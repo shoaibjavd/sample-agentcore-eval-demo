@@ -1,0 +1,153 @@
+# AgentCore Evaluation Pipeline
+# Deploys combined stack (assistant + MCP server), invokes agent, runs evaluations, gates the PR.
+#
+# Required GitHub Secrets:
+#   AWS_ROLE_ARN          - IAM role for GitHub OIDC
+
+name: AgentCore Evaluation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-2
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # --- Deploy infrastructure ---
+      - name: Install CDK dependencies
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install .
+
+      - name: Set up QEMU for arm64 Docker builds
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: CDK deploy
+        run: |
+          source .venv/bin/activate
+          npx cdk deploy --require-approval never --outputs-file outputs.json
+
+      - name: Extract CDK outputs
+        id: cdk
+        run: |
+          STACK="AgentCoreCICDStack-dev"
+          echo "agent_arn=$(jq -r ".[\"$STACK\"].AgentRuntimeArn" outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "agent_id=$(jq -r ".[\"$STACK\"].AgentRuntimeId" outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "mcp_id=$(jq -r ".[\"$STACK\"].MCPRuntimeId" outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "token_endpoint=$(jq -r ".[\"$STACK\"].TokenEndpoint" outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "m2m_client_id=$(jq -r ".[\"$STACK\"].M2MClientId" outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "pool_id=$(jq -r ".[\"$STACK\"].SharedUserPoolId" outputs.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Get M2M client secret
+        id: secret
+        run: |
+          SECRET=$(aws cognito-idp describe-user-pool-client \
+            --user-pool-id "${{ steps.cdk.outputs.pool_id }}" \
+            --client-id "${{ steps.cdk.outputs.m2m_client_id }}" \
+            --region "${{ env.AWS_REGION }}" \
+            --query 'UserPoolClient.ClientSecret' --output text)
+          echo "::add-mask::$SECRET"
+          echo "client_secret=$SECRET" >> "$GITHUB_OUTPUT"
+
+      # --- Wait for runtimes ---
+      - name: Restart runtimes to pick up new container images
+        run: |
+          pip install boto3
+          python3 -c "
+          import boto3
+          client = boto3.client('bedrock-agentcore-control', region_name='${{ env.AWS_REGION }}')
+          for rid in ['${{ steps.cdk.outputs.mcp_id }}', '${{ steps.cdk.outputs.agent_id }}']:
+              rt = client.get_agent_runtime(agentRuntimeId=rid)
+              env_vars = rt.get('environmentVariables', {})
+              if rid == '${{ steps.cdk.outputs.agent_id }}':
+                  env_vars['MCP_CLIENT_SECRET'] = '${{ steps.secret.outputs.client_secret }}'
+              kwargs = dict(
+                  agentRuntimeId=rid,
+                  agentRuntimeArtifact=rt['agentRuntimeArtifact'],
+                  roleArn=rt['roleArn'],
+                  networkConfiguration=rt['networkConfiguration'],
+                  description=rt.get('description', ''),
+                  environmentVariables=env_vars,
+              )
+              if 'authorizerConfiguration' in rt:
+                  kwargs['authorizerConfiguration'] = rt['authorizerConfiguration']
+              client.update_agent_runtime(**kwargs)
+              print(f'Triggered update for {rid}')
+          "
+
+      - name: Wait for runtimes READY
+        run: |
+          python3 -c "
+          import boto3, time, sys
+          client = boto3.client('bedrock-agentcore-control', region_name='${{ env.AWS_REGION }}')
+          for name, rid in [('MCP', '${{ steps.cdk.outputs.mcp_id }}'), ('Agent', '${{ steps.cdk.outputs.agent_id }}')]:
+              for _ in range(60):
+                  s = client.get_agent_runtime(agentRuntimeId=rid)['status']
+                  print(f'{name} Status: {s}')
+                  if s == 'READY': break
+                  if 'FAILED' in s: sys.exit(1)
+                  time.sleep(10)
+              else:
+                  sys.exit(1)
+          "
+
+      # --- Run evaluation ---
+      - name: Install eval dependencies
+        run: pip install boto3 requests bedrock-agentcore-starter-toolkit
+
+      - name: Run evaluation
+        working-directory: scripts
+        run: |
+          mkdir -p evals_results
+          python3 agentcore_eval.py
+        env:
+          AGENT_RUNTIME_ARN: ${{ steps.cdk.outputs.agent_arn }}
+          AGENT_RUNTIME_ID: ${{ steps.cdk.outputs.agent_id }}
+          TOKEN_ENDPOINT: ${{ steps.cdk.outputs.token_endpoint }}
+          OAUTH_CLIENT_ID: ${{ steps.cdk.outputs.m2m_client_id }}
+          OAUTH_CLIENT_SECRET: ${{ steps.secret.outputs.client_secret }}
+          OAUTH_SCOPE: "agentcore/invoke"
+          EVAL_THRESHOLD: "0.8"
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: scripts/evals_results/ci_output.json
+
+      # --- Teardown ---
+      - name: CDK destroy
+        if: always()
+        run: |
+          source .venv/bin/activate
+          npx cdk destroy --force

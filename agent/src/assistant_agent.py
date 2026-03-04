@@ -1,0 +1,197 @@
+from strands import Agent, tool
+from strands_tools import calculator
+from strands.tools.mcp import MCPClient
+from mcp.client.streamable_http import streamablehttp_client
+import os
+import json
+import time
+import base64
+import urllib.parse
+import boto3
+import httpx
+from datetime import timedelta
+from bedrock_agentcore.runtime import BedrockAgentCoreApp
+from bedrock_agentcore.runtime.context import RequestContext
+from strands.models import BedrockModel
+
+app = BedrockAgentCoreApp()
+
+MCP_SERVER_ARN = os.getenv("MCP_SERVER_ARN")
+MCP_OAUTH_SCOPE = os.getenv("MCP_OAUTH_SCOPE", "mcp/invoke")
+AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "ap-southeast-2")
+_encoded_arn = urllib.parse.quote(MCP_SERVER_ARN, safe="") if MCP_SERVER_ARN else None
+MCP_URL = (
+    f"https://bedrock-agentcore.{AWS_REGION}.amazonaws.com/runtimes/"
+    f"{_encoded_arn}/invocations?qualifier=DEFAULT"
+    if _encoded_arn else None
+)
+
+_m2m_token_cache = {"token": None, "expires_at": 0}
+
+
+async def get_mcp_token_m2m() -> str:
+    """Get M2M token from Cognito using client credentials stored in Secrets Manager."""
+    if _m2m_token_cache["token"] and time.time() < _m2m_token_cache["expires_at"]:
+        return _m2m_token_cache["token"]
+
+    client_id = os.getenv("MCP_CLIENT_ID")
+    client_secret = os.getenv("MCP_CLIENT_SECRET")
+    token_endpoint = os.getenv("MCP_TOKEN_ENDPOINT")
+
+    if not client_secret and os.getenv("SECRET_ARN"):
+        try:
+            secrets_client = boto3.client("secretsmanager", region_name=AWS_REGION)
+            secret_response = secrets_client.get_secret_value(SecretId=os.getenv("SECRET_ARN"))
+            secret_data = json.loads(secret_response["SecretString"])
+            client_id = secret_data.get("client_id", client_id)
+            client_secret = secret_data["client_secret"]
+            token_endpoint = secret_data.get("token_endpoint", token_endpoint)
+        except Exception as e:
+            print(f"Failed to retrieve secret: {e}")
+
+    if not all([client_id, client_secret, token_endpoint]):
+        raise ValueError("MCP OAuth credentials not configured")
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            token_endpoint,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "scope": MCP_OAUTH_SCOPE,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        _m2m_token_cache["token"] = data["access_token"]
+        _m2m_token_cache["expires_at"] = time.time() + data.get("expires_in", 3600) - 60
+
+        return data["access_token"]
+
+
+def _extract_bearer_token(request_context: RequestContext) -> str | None:
+    """Extract Bearer token from request context headers."""
+    headers = request_context.request_headers or {}
+    auth = headers.get("Authorization") or headers.get("authorization") or ""
+    return auth.removeprefix("Bearer ").strip() or None
+
+
+def _is_user_token(token: str) -> bool:
+    """Check if a JWT is a user token (has 'sub' claim) vs M2M."""
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+        return "sub" in claims
+    except Exception:
+        return False
+
+
+def _make_mcp_client(token: str) -> MCPClient | None:
+    """Create an MCPClient using the official streamablehttp_client transport."""
+    if not MCP_URL:
+        return None
+    try:
+        headers = {"Authorization": f"Bearer {token}"}
+        client = MCPClient(
+            lambda: streamablehttp_client(
+                MCP_URL, headers, timeout=timedelta(seconds=120), terminate_on_close=False
+            )
+        )
+        client.__enter__()
+        return client
+    except Exception as e:
+        print(f"Failed to initialize MCP client: {e}")
+        return None
+
+
+@tool
+def weather(location: str) -> str:
+    """Get current weather for a location."""
+    data = {
+        "sydney": "Sunny, 28°C",
+        "london": "Cloudy, 12°C",
+        "new york": "Partly cloudy, 18°C",
+        "tokyo": "Rainy, 15°C",
+        "paris": "Clear, 20°C",
+    }
+    return data.get(location.lower(), f"{location}: Sunny, 22°C")
+
+
+model = BedrockModel(model_id=os.getenv("MODEL_ID", "au.anthropic.claude-haiku-4-5-20251001-v1:0"))
+
+_m2m_mcp_client = None
+_m2m_initialized = False
+
+
+async def _get_m2m_mcp_client() -> MCPClient | None:
+    """Get or initialize the shared M2M MCP client."""
+    global _m2m_mcp_client, _m2m_initialized
+    if _m2m_initialized:
+        return _m2m_mcp_client
+    _m2m_initialized = True
+
+    if not MCP_SERVER_ARN:
+        print("Warning: MCP_SERVER_ARN not configured, MCP tools unavailable")
+        return None
+
+    try:
+        token = await get_mcp_token_m2m()
+        _m2m_mcp_client = _make_mcp_client(token)
+        return _m2m_mcp_client
+    except Exception as e:
+        print(f"Failed to initialize MCP client: {e}")
+        return None
+
+
+def get_tools(mcp_client: MCPClient | None):
+    """Get all available tools."""
+    tools = [calculator, weather]
+    if mcp_client:
+        try:
+            tools.extend(mcp_client.list_tools_sync())
+        except Exception as e:
+            print(f"Failed to list MCP tools: {e}")
+    return tools
+
+
+@app.entrypoint
+async def handle_request(payload, request_context: RequestContext = None):
+    """Handle incoming requests.
+
+    If the caller is a user (JWT has 'sub' claim), their token is forwarded
+    to the MCP server so role-based tool access is enforced.
+    For M2M callers (CI pipelines), a shared M2M token is used instead.
+    """
+    prompt = payload if isinstance(payload, str) else payload.get("prompt", str(payload))
+
+    incoming_token = _extract_bearer_token(request_context) if request_context else None
+    user_mcp_client = None
+
+    if incoming_token and _is_user_token(incoming_token):
+        user_mcp_client = _make_mcp_client(incoming_token)
+        mcp_client = user_mcp_client
+    else:
+        mcp_client = await _get_m2m_mcp_client()
+
+    try:
+        agent = Agent(
+            model=model,
+            tools=get_tools(mcp_client),
+            system_prompt="You're a helpful assistant with math, weather, geography, finance, and HR tools."
+        )
+        result = await agent.invoke_async(prompt)
+        return str(result)
+    finally:
+        if user_mcp_client:
+            try:
+                user_mcp_client.__exit__(None, None, None)
+            except Exception:
+                pass
+
+
+if __name__ == "__main__":
+    app.run()

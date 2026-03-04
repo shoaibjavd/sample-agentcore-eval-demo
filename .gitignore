@@ -1,2 +1,8 @@
-# Ignore the `build/` directory in the package root.
-/build
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+cdk.out/
+outputs.json
+.DS_Store
+node_modules/
