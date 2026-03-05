@@ -70,8 +70,11 @@ Reference implementation for running automated evaluations on an AgentCore-hoste
 ├── infrastructure/
 │   ├── stack.py                     # CDK stack (Cognito + both runtimes)
 │   └── roles.py                     # IAM roles for AgentCore
+├── fixtures/
+│   └── sample_traces.json           # Pre-collected OTel traces for Approach A
 ├── scripts/
-│   ├── agentcore_eval.py            # Unified eval script
+│   ├── agentcore_eval.py            # Unified eval script (Approach C — live invocation)
+│   ├── evaluate_stored_traces.py    # Approach A — evaluate pre-collected fixtures
 │   └── eval_dataset.json            # Test prompts
 ├── .github/
 │   └── workflows/
