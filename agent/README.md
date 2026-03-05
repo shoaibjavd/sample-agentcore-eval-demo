@@ -23,6 +23,8 @@ The agent combines built-in tools with MCP server tools:
 
 ## Environment variables
 
+> **Important:** AgentCore Runtime requires ARM64 container images. The Dockerfile uses `--platform=linux/arm64`. If building on x86_64 (e.g., GitHub Actions runners), you need QEMU + Docker Buildx for cross-compilation. The GitHub Actions workflow handles this with `docker/setup-qemu-action` and `docker/setup-buildx-action`.
+
 | Variable | Description |
 |---|---|
 | `MODEL_ID` | Bedrock model ID (default: `au.anthropic.claude-haiku-4-5-20251001-v1:0`) |
