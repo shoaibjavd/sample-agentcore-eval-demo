@@ -9,10 +9,17 @@ name: AgentCore Evaluation
 on:
   pull_request:
     branches: [main]
+    paths:
+      - "agent/**"
+      - "mcp-server/**"
+      - "infrastructure/**"
+      - "scripts/**"
+      - ".github/workflows/agentcore-eval.yml"
 
 permissions:
   id-token: write
   contents: read
+  pull-requests: write
 
 env:
   AWS_REGION: ap-southeast-2
@@ -144,6 +151,46 @@ jobs:
         with:
           name: eval-results
           path: scripts/evals_results/ci_output.json
+
+      - name: Post evaluation summary to PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '## 🤖 AgentCore Evaluation Results\n\n';
+            try {
+              if (!fs.existsSync('scripts/evals_results/ci_output.json')) {
+                body += '⚠️ No evaluation results generated. Check workflow logs.';
+              } else {
+                const raw = JSON.parse(fs.readFileSync('scripts/evals_results/ci_output.json', 'utf8'));
+                const threshold = 0.8;
+                body += '| Evaluator | Score | Status |\n|-----------|-------|--------|\n';
+                let allPassed = true;
+                const results = raw.results || [];
+                const scores = {};
+                for (const r of results) {
+                  if (r.value != null && (!scores[r.evaluator_name] || r.value > scores[r.evaluator_name])) {
+                    scores[r.evaluator_name] = r.value;
+                  }
+                }
+                for (const [name, score] of Object.entries(scores)) {
+                  const passed = score >= threshold;
+                  if (!passed) allPassed = false;
+                  body += `| ${name} | ${score.toFixed(2)} | ${passed ? '✅ Pass' : '❌ Fail'} |\n`;
+                }
+                body += `\n**Threshold:** ${threshold}\n`;
+                body += allPassed ? '\n✅ **Quality gate passed.**' : '\n❌ **Quality gate failed.**';
+              }
+            } catch (e) {
+              body += '⚠️ Could not parse results: ' + e.message;
+            }
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body,
+            });
 
       # --- Teardown ---
       - name: CDK destroy
