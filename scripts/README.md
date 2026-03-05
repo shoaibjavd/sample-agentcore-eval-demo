@@ -10,6 +10,20 @@ Unified evaluation script that runs the full pipeline:
 4. **Run evaluations** — uses `bedrock-agentcore-starter-toolkit` to run built-in evaluators against the session traces.
 5. **Gate on threshold** — exits non-zero if any evaluator score falls below `EVAL_THRESHOLD`.
 
+## evaluate_stored_traces.py
+
+Approach A — evaluate pre-collected trace fixtures without live agent invocation. Useful for:
+- Deterministic CI gates (same traces = same scores)
+- Local development without AWS credentials for agent invocation
+- Faster feedback loops (no deploy/invoke cycle)
+
+```bash
+export AWS_REGION=us-east-1
+export TRACE_FIXTURES_DIR=../fixtures
+export EVAL_THRESHOLD=0.7
+python3 evaluate_stored_traces.py
+```
+
 ## eval_dataset.json
 
 Test prompts covering the agent's tool surface:
