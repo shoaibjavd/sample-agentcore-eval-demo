@@ -35,6 +35,18 @@ Test prompts covering the agent's tool surface:
 
 ## Environment variables
 
+## Built-in Evaluators Reference
+
+AgentCore provides 14 built-in evaluators across three levels:
+
+- **Session:** `GoalSuccessRate`
+- **Trace:** `Helpfulness`, `Correctness`, `Coherence`, `Conciseness`, `ContextRelevance`, `Faithfulness`, `Harmfulness`, `InstructionFollowing`, `Refusal`, `ResponseRelevance`, `Stereotyping`
+- **Tool-call:** `ToolSelectionAccuracy`, `ToolParameterAccuracy`
+
+The eval scripts use a subset. See the [AWS docs](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/prompt-templates-builtin.html) for full descriptions.
+
+## Environment variables
+
 | Variable | Description |
 |---|---|
 | `AGENT_RUNTIME_ARN` | ARN of the agent runtime |
