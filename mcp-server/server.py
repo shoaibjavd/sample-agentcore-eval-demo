@@ -17,6 +17,7 @@ from fastmcp import FastMCP
 from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from pydantic import Field
 from pythonjsonlogger.json import JsonFormatter
+
 from src.auth import auth_meta
 from src.auth.middleware import AuthMiddleware
 
@@ -39,13 +40,9 @@ mcp.add_middleware(AuthMiddleware())
 
 @mcp.tool(tags={"DateTime"})
 def get_current_datetime(
-    timezone_name: Annotated[
-        str,
-        Field(
-            description="IANA time zone name (e.g. 'Australia/Perth', 'UTC')",
-            min_length=1,
-        ),
-    ] = "UTC",
+    timezone_name: Annotated[str, Field(
+        description="IANA time zone name (e.g. 'Australia/Perth', 'UTC')", min_length=1,
+    )] = "UTC",
 ) -> str:
     """Returns the current date and time in ISO 8601 format."""
     try:

@@ -1,18 +1,18 @@
-import base64
-import json
+from strands import Agent
+from strands_tools import calculator
+from strands.tools.mcp import MCPClient
+from mcp.client.streamable_http import streamablehttp_client, streamable_http_client
 import os
+import json
 import time
+import base64
 import urllib.parse
-
 import boto3
 import httpx
+from datetime import timedelta
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from bedrock_agentcore.runtime.context import RequestContext
-from mcp.client.streamable_http import streamable_http_client
-from strands import Agent
 from strands.models import BedrockModel
-from strands.tools.mcp import MCPClient
-from strands_tools import calculator
 
 app = BedrockAgentCoreApp()
 
@@ -21,9 +21,9 @@ MCP_OAUTH_SCOPE = os.getenv("MCP_OAUTH_SCOPE", "mcp/invoke")
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "ap-southeast-2")
 _encoded_arn = urllib.parse.quote(MCP_SERVER_ARN, safe="") if MCP_SERVER_ARN else None
 MCP_URL = (
-    f"https://bedrock-agentcore.{AWS_REGION}.amazonaws.com/runtimes/{_encoded_arn}/invocations?qualifier=DEFAULT"
-    if _encoded_arn
-    else None
+    f"https://bedrock-agentcore.{AWS_REGION}.amazonaws.com/runtimes/"
+    f"{_encoded_arn}/invocations?qualifier=DEFAULT"
+    if _encoded_arn else None
 )
 
 _m2m_token_cache = {"token": None, "expires_at": 0}
@@ -75,7 +75,6 @@ async def get_mcp_token_m2m() -> str:
 def _extract_bearer_token() -> str | None:
     """Extract Bearer token from BedrockAgentCoreContext headers."""
     from bedrock_agentcore.runtime import BedrockAgentCoreContext
-
     headers = BedrockAgentCoreContext.get_request_headers() or {}
     auth = headers.get("Authorization") or headers.get("authorization") or ""
     return auth.removeprefix("Bearer ").strip() or None
@@ -98,7 +97,9 @@ def _make_mcp_client(token: str) -> MCPClient | None:
         return None
     try:
         http_client = httpx.AsyncClient(timeout=120, headers={"Authorization": f"Bearer {token}"})
-        client = MCPClient(lambda hc=http_client: streamable_http_client(url=MCP_URL, http_client=hc))
+        client = MCPClient(
+            lambda hc=http_client: streamable_http_client(url=MCP_URL, http_client=hc)
+        )
         client.__enter__()
         return client
     except Exception as e:
@@ -158,8 +159,13 @@ async def handle_request(payload, request_context: RequestContext = None):
 
     if incoming_token and _is_user_token(incoming_token):
         # Per-request MCP client with user's token for role-based access
-        user_http_client = httpx.AsyncClient(timeout=120, headers={"Authorization": f"Bearer {incoming_token}"})
-        user_mcp_client = MCPClient(lambda hc=user_http_client: streamable_http_client(url=MCP_URL, http_client=hc))
+        user_http_client = httpx.AsyncClient(
+            timeout=120,
+            headers={"Authorization": f"Bearer {incoming_token}"}
+        )
+        user_mcp_client = MCPClient(
+            lambda hc=user_http_client: streamable_http_client(url=MCP_URL, http_client=hc)
+        )
         user_mcp_client.__enter__()
         mcp_client = user_mcp_client
     else:
@@ -175,7 +181,7 @@ async def handle_request(payload, request_context: RequestContext = None):
                 "department headcount queries. Use the appropriate tool for each request. "
                 "Respond concisely and professionally. If a request falls outside your "
                 "available tools, say so clearly rather than guessing."
-            ),
+            )
         )
         result = await agent.invoke_async(prompt)
         return str(result)

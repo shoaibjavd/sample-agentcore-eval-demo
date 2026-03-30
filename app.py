@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """CDK entry point — deploys both MCP server and Assistant agent with shared Cognito pool."""
-
 import os
 
 import aws_cdk as cdk

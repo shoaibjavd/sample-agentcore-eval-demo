@@ -107,8 +107,6 @@ jobs:
               )
               if 'authorizerConfiguration' in rt:
                   kwargs['authorizerConfiguration'] = rt['authorizerConfiguration']
-              if 'requestHeaderConfiguration' in rt:
-                  kwargs['requestHeaderConfiguration'] = rt['requestHeaderConfiguration']
               client.update_agent_runtime(**kwargs)
               print(f'Triggered update for {rid}')
           "
@@ -127,8 +125,6 @@ jobs:
                   time.sleep(10)
               else:
                   sys.exit(1)
-          print('Waiting 60s for MCP server to accept connections...')
-          time.sleep(60)
           "
 
       # --- Run evaluation ---
@@ -196,9 +192,9 @@ jobs:
               body: body,
             });
 
-      # --- Teardown (disabled for debugging) ---
-      # - name: CDK destroy
-      #   if: always()
-      #   run: |
-      #     source .venv/bin/activate
-      #     npx cdk destroy --force
+      # --- Teardown ---
+      - name: CDK destroy
+        if: always()
+        run: |
+          source .venv/bin/activate
+          npx cdk destroy --force
