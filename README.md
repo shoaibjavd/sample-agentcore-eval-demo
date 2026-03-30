@@ -62,9 +62,10 @@ Reference implementation for running automated evaluations on an AgentCore-hoste
 ## Prerequisites
 
 - AWS account with Bedrock AgentCore access
-- CDK bootstrapped (`cdk bootstrap`)
+- CDK bootstrapped (`npx cdk bootstrap`)
 - Docker installed and running
 - Python 3.12+
+- Node.js 18+
 
 ## Quick Start
 
@@ -82,7 +83,7 @@ source .venv/bin/activate
 pip install .
 
 # Deploy the stack
-cdk deploy --outputs-file outputs.json
+npx cdk deploy --outputs-file outputs.json
 ```
 
 CDK outputs include: `SharedUserPoolId`, `M2MClientId`, `UserClientId`, `TokenEndpoint`, `MCPRuntimeId`, `MCPRuntimeArn`, `AgentRuntimeId`, `AgentRuntimeArn`.
@@ -135,5 +136,5 @@ python3 agentcore_eval.py
 
 ```bash
 source .venv/bin/activate
-cdk destroy --force
+npx cdk destroy --force
 ```
