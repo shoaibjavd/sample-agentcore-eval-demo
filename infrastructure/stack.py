@@ -13,7 +13,16 @@ from infrastructure.roles import AgentCoreRuntimeRole, MCPServerRole
 
 
 class CombinedStack(cdk.Stack):
-    """Combined stack with shared Cognito pool for both agents."""
+    """Deploys the full AgentCore eval demo infrastructure:
+
+    1. Shared Cognito pool — JWT auth for both MCP server and assistant agent
+       - M2M client (client_credentials grant) for CI pipelines
+       - User client (auth code grant) for interactive users with role claims
+       - Pre-token Lambda injects custom:roles into access tokens
+    2. MCP Server Runtime — FastMCP server with role-gated tools (finance, HR, datetime)
+    3. Assistant Agent Runtime — Strands agent that connects to MCP server for tools
+    4. Secrets Manager — stores M2M client credentials for agent → MCP auth
+    """
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -43,7 +52,8 @@ class CombinedStack(cdk.Stack):
             ),
         )
 
-        # Upgrade to V2_0 trigger (required for access token customization)
+        # Upgrade to V2_0 trigger (required for access token customization —
+        # V1_0 only supports ID token customization, not access tokens)
         cfn_pool = pool.node.default_child
         cfn_pool.add_property_override(
             "LambdaConfig.PreTokenGenerationConfig",
