@@ -1,16 +1,14 @@
 """Eval script: get OAuth token → invoke agent via HTTPS → run AgentCore evaluations → gate on threshold.
-# CI trigger test
 
 NOTE: When an AgentCore Runtime is configured with JWT/OAuth inbound auth,
 you CANNOT use the boto3 SDK to invoke it. You must make a direct HTTPS request
 with a Bearer token. The evaluation API itself is IAM-authenticated (boto3 works fine).
 """
-
 import json
 import os
 import sys
-import urllib.parse
 import uuid
+import urllib.parse
 
 import requests as http_requests
 from bedrock_agentcore_starter_toolkit import Evaluation
@@ -63,9 +61,8 @@ def invoke_agent(agent_arn: str, session_id: str, prompt: str, region: str, toke
 
 def wait_for_runtime(agent_id: str, region: str, max_wait: int = 600):
     """Wait for runtime to be READY before invoking."""
-    import time
-
     import boto3
+    import time
 
     client = boto3.client("bedrock-agentcore-control", region_name=region)
     elapsed = 0
@@ -112,7 +109,6 @@ def main():
 
     # Retry evaluations until traces are found (up to 10 min)
     import time
-
     evaluators = [
         "Builtin.GoalSuccessRate",
         "Builtin.Correctness",
@@ -130,9 +126,7 @@ def main():
 
     while elapsed <= max_wait:
         # Suppress noisy SDK output during retries
-        import contextlib
-        import io
-
+        import io, contextlib
         buf = io.StringIO()
         try:
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
@@ -148,7 +142,8 @@ def main():
             time.sleep(interval)
             continue
         all_have_results = all(
-            any(r.value is not None for r in results.results if r.evaluator_name == e) for e in evaluators
+            any(r.value is not None for r in results.results if r.evaluator_name == e)
+            for e in evaluators
         )
         if all_have_results:
             break
