@@ -109,15 +109,13 @@ def _make_mcp_client(token: str) -> MCPClient | None:
 model = BedrockModel(model_id=os.getenv("MODEL_ID", "au.anthropic.claude-haiku-4-5-20251001-v1:0"))
 
 _m2m_mcp_client = None
-_m2m_initialized = False
 
 
 async def _get_m2m_mcp_client() -> MCPClient | None:
     """Get or initialize the shared M2M MCP client."""
-    global _m2m_mcp_client, _m2m_initialized
-    if _m2m_initialized:
+    global _m2m_mcp_client
+    if _m2m_mcp_client:
         return _m2m_mcp_client
-    _m2m_initialized = True
 
     if not MCP_SERVER_ARN:
         print("Warning: MCP_SERVER_ARN not configured, MCP tools unavailable")
