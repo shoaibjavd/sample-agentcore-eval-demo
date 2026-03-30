@@ -6,3 +6,8 @@ cdk.out/
 outputs.json
 .DS_Store
 node_modules/
+.ipynb_checkpoints/
+.ruff_cache/
+eval_output.json
+.vscode/
+build/
