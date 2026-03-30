@@ -1,4 +1,4 @@
-from strands import Agent, tool
+from strands import Agent
 from strands_tools import calculator
 from strands.tools.mcp import MCPClient
 from mcp.client.streamable_http import streamablehttp_client, streamable_http_client
@@ -107,19 +107,6 @@ def _make_mcp_client(token: str) -> MCPClient | None:
         return None
 
 
-@tool
-def weather(location: str) -> str:
-    """Get current weather for a location."""
-    data = {
-        "sydney": "Sunny, 28°C",
-        "london": "Cloudy, 12°C",
-        "new york": "Partly cloudy, 18°C",
-        "tokyo": "Rainy, 15°C",
-        "paris": "Clear, 20°C",
-    }
-    return data.get(location.lower(), f"{location}: Sunny, 22°C")
-
-
 model = BedrockModel(model_id=os.getenv("MODEL_ID", "au.anthropic.claude-haiku-4-5-20251001-v1:0"))
 
 _m2m_mcp_client = None
@@ -148,7 +135,7 @@ async def _get_m2m_mcp_client() -> MCPClient | None:
 
 def get_tools(mcp_client: MCPClient | None):
     """Get all available tools."""
-    tools = [calculator, weather]
+    tools = [calculator]
     if mcp_client:
         try:
             tools.extend(mcp_client.list_tools_sync())
@@ -188,7 +175,13 @@ async def handle_request(payload, request_context: RequestContext = None):
         agent = Agent(
             model=model,
             tools=get_tools(mcp_client),
-            system_prompt="You're a helpful assistant with math, weather, geography, finance, and HR tools."
+            system_prompt=(
+                "You are an office assistant for internal staff. You have access to tools for "
+                "arithmetic calculations, date and time lookups, stock price retrieval, and "
+                "department headcount queries. Use the appropriate tool for each request. "
+                "Respond concisely and professionally. If a request falls outside your "
+                "available tools, say so clearly rather than guessing."
+            )
         )
         result = await agent.invoke_async(prompt)
         return str(result)

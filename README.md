@@ -4,46 +4,19 @@ Reference implementation for running automated evaluations on an AgentCore-hoste
 
 ## Architecture
 
-```
-┌─────────────┐    client_credentials    ┌─────────────────┐
-│  CI Pipeline │ ──────────────────────► │  Cognito Pool    │
-│  (GitHub)    │ ◄────── M2M token ───── │  (shared)        │
-└──────┬───────┘                         └─────────────────┘
-       │ Bearer token                        │
-       ▼                                     │ JWT validation
-┌──────────────────┐                         │
-│  Agent Runtime   │ ◄───────────────────────┘
-│  (Strands agent) │
-│  - calculator    │    Bearer token (forwarded)
-│  - weather       │ ──────────────────────────────┐
-└──────────────────┘                               ▼
-                                          ┌──────────────────┐
-                                          │  MCP Server       │
-                                          │  (FastMCP)        │
-                                          │  - get_capital    │  ← public
-                                          │  - get_datetime   │  ← public
-                                          │  - get_stock_price│  ← FinanceUser
-                                          │  - get_employee   │  ← HRUser
-                                          └────────┬─────────┘
-                                                   │
-                                                   ▼
-                                          ┌──────────────────┐
-                                          │  AgentCore Eval  │
-                                          │  API (IAM auth)  │
-                                          └──────────────────┘
-```
+![Architecture](assets/architecture.png)
 
 ## Auth Flows
 
-**M2M (CI pipelines):** `client_credentials` grant → Cognito issues access token with scopes only → MCP middleware sees scopes + no roles → bypasses role checks → all tools accessible.
+**M2M (CI pipelines):** `client_credentials` grant → Cognito issues access token with scopes only → MCP `AuthMiddleware` sees scopes + no roles → bypasses role checks → all tools accessible.
 
-**User-scoped (interactive):** `authorization_code` grant → Cognito issues ID token with `custom:roles` claim → agent forwards token to MCP → middleware extracts roles → tool-level checks enforce access (e.g., only `FinanceUser` can call `get_stock_price`).
+**User-scoped (interactive):** `ADMIN_NO_SRP_AUTH` or `authorization_code` grant → Cognito issues access token with `custom:roles` claim (via pre-token-generation Lambda V2) → agent forwards token to MCP via `request_header_allowlist` → `AuthMiddleware` extracts roles → tool-level checks enforce access (e.g., only `FinanceUser` can call `get_stock_price`).
 
-## 3-Layer MCP Auth
+## MCP Auth Layers
 
-1. **JWT validation (AgentCore):** Signature, issuer, expiry verified by the platform before the request reaches your code.
-2. **Claim extraction (Starlette middleware):** Decodes JWT payload, extracts `roles` and `scopes`, stores on `request.state.auth`.
-3. **Tool-level role checks:** Each tool checks `TOOL_ROLES` config. M2M tokens bypass; user tokens must have the required role.
+1. **JWT validation (AgentCore):** Signature, issuer, expiry verified by the platform via `authorizer_configuration` before the request reaches your code.
+2. **Header passthrough:** `request_header_allowlist=["Authorization"]` on both runtimes ensures the JWT reaches the agent and MCP containers.
+3. **Role-based tool access (`AuthMiddleware`):** Uses `fastmcp.server.dependencies.get_http_headers()` to read the JWT, decodes claims, and enforces `custom:roles` against tool `meta`. M2M tokens (scopes but no roles) bypass; user tokens must have the required role.
 
 ## Repo Structure
 
@@ -63,24 +36,27 @@ Reference implementation for running automated evaluations on an AgentCore-hoste
 │   ├── server.py                    # FastMCP server with role-gated tools
 │   └── src/
 │       ├── auth/
-│       │   ├── models.py            # AccessToken Pydantic model
-│       │   ├── starlette_middleware.py  # JWT claim extraction
-│       │   └── utils.py             # Token parsing helpers
+│       │   ├── middleware.py        # AuthMiddleware for role-based tool access
+│       │   ├── models.py           # AccessToken Pydantic model
+│       │   └── utils.py            # Token parsing via get_http_headers()
 │       └── exceptions.py
 ├── infrastructure/
 │   ├── stack.py                     # CDK stack (Cognito + both runtimes)
-│   └── roles.py                     # IAM roles for AgentCore
+│   ├── roles.py                     # IAM roles for AgentCore
+│   └── pre_token_lambda/
+│       └── index.py                 # Copies custom:roles into access tokens
 ├── fixtures/
-│   └── sample_traces.json           # Pre-collected OTel traces for Approach A
+│   └── sample_traces.json           # Pre-collected OTel traces
 ├── scripts/
-│   ├── agentcore_eval.py            # Unified eval script (Approach C — live invocation)
-│   ├── evaluate_stored_traces.py    # Approach A — evaluate pre-collected fixtures
+│   ├── agentcore_eval.py            # Eval script (live invocation)
+│   ├── evaluate_stored_traces.py    # Evaluate pre-collected fixtures
 │   └── eval_dataset.json            # Test prompts
 ├── .github/
 │   └── workflows/
 │       └── agentcore-eval.yml       # CI/CD pipeline
 └── notebooks/
-    └── (placeholder for walkthrough notebook)
+    ├── 01_deploy_and_test_rbac.ipynb # Deploy + test role enforcement
+    └── 02_evaluation_pipeline.ipynb  # Eval pipeline walkthrough
 ```
 
 ## Prerequisites
@@ -90,6 +66,13 @@ Reference implementation for running automated evaluations on an AgentCore-hoste
 - Docker installed and running
 - Python 3.12+
 - Node.js 18+
+
+## Quick Start
+
+The fastest way to get started is via the notebooks:
+
+1. Open `notebooks/01_deploy_and_test_rbac.ipynb` — deploys the stack, sets user passwords, and runs role-based access tests.
+2. Open `notebooks/02_evaluation_pipeline.ipynb` — runs the evaluation pipeline with M2M token and quality gates.
 
 ## Deployment
 
@@ -107,10 +90,14 @@ CDK outputs include: `SharedUserPoolId`, `M2MClientId`, `UserClientId`, `TokenEn
 
 ## Testing
 
+### Role-based access tests
+
+Run the `notebooks/01_deploy_and_test_rbac.ipynb` notebook to deploy the stack and test role enforcement interactively.
+
 ### M2M (CI-style) invocation
 
 ```bash
-# Get M2M token
+# Get M2M token (client secret stored in Secrets Manager: agentcore/dev/m2m-client)
 TOKEN=$(curl -s -X POST "$TOKEN_ENDPOINT" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=client_credentials&client_id=$M2M_CLIENT_ID&client_secret=$M2M_CLIENT_SECRET&scope=agentcore/invoke" \
@@ -120,12 +107,8 @@ TOKEN=$(curl -s -X POST "$TOKEN_ENDPOINT" \
 curl -X POST "https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$(python3 -c "import urllib.parse; print(urllib.parse.quote('$AGENT_ARN', safe=''))")/invocations?qualifier=DEFAULT" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "What is the capital of France?"}'
+  -d '{"prompt": "What is the stock price of AAPL?"}'
 ```
-
-### User-scoped invocation
-
-Use the Cognito Hosted UI to sign in as `user-a` (FinanceUser) or `user-b` (HRUser), obtain an ID token, and invoke the agent with that token. Role-gated tools will be enforced based on the user's `custom:roles` claim.
 
 ### Run evaluations locally
 
