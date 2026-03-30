@@ -71,6 +71,7 @@ class CombinedStack(cdk.Stack):
 
         user_client = pool.add_client(
             "UserClient", generate_secret=False,
+            auth_flows=cognito.AuthFlow(admin_user_password=True, user_srp=True),
             o_auth=cognito.OAuthSettings(
                 flows=cognito.OAuthFlows(authorization_code_grant=True, implicit_code_grant=True),
                 scopes=[
@@ -146,7 +147,7 @@ class CombinedStack(cdk.Stack):
             request_header_configuration=CfnRuntime.RequestHeaderConfigurationProperty(
                 request_header_allowlist=["Authorization"]
             ),
-            environment_variables={"AWS_DEFAULT_REGION": region, "LOG_LEVEL": "DEBUG", "DEPLOY_VERSION": "4", "USER_POOL_ID": pool.user_pool_id},
+            environment_variables={"AWS_DEFAULT_REGION": region, "LOG_LEVEL": "DEBUG", "DEPLOY_VERSION": "5", "USER_POOL_ID": pool.user_pool_id},
         )
 
         # --- Assistant Agent Runtime ---
