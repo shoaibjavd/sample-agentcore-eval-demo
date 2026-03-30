@@ -107,6 +107,8 @@ jobs:
               )
               if 'authorizerConfiguration' in rt:
                   kwargs['authorizerConfiguration'] = rt['authorizerConfiguration']
+              if 'requestHeaderConfiguration' in rt:
+                  kwargs['requestHeaderConfiguration'] = rt['requestHeaderConfiguration']
               client.update_agent_runtime(**kwargs)
               print(f'Triggered update for {rid}')
           "
