@@ -194,9 +194,9 @@ jobs:
               body: body,
             });
 
-      # --- Teardown ---
-      - name: CDK destroy
-        if: always()
-        run: |
-          source .venv/bin/activate
-          npx cdk destroy --force
+      # --- Teardown (disabled for debugging) ---
+      # - name: CDK destroy
+      #   if: always()
+      #   run: |
+      #     source .venv/bin/activate
+      #     npx cdk destroy --force
