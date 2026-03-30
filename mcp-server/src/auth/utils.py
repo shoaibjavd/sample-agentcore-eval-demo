@@ -4,7 +4,6 @@ we only decode the payload to read claims for role-based access."""
 import jwt
 from fastmcp.server.dependencies import get_http_headers
 from jwt import PyJWTError
-
 from src.auth.models import AccessToken
 from src.exceptions import AuthError
 

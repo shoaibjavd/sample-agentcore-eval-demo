@@ -4,11 +4,9 @@ import copy
 import logging
 from typing import Callable
 
-from fastmcp.exceptions import FastMCPError, PromptError, ResourceError, ToolError
-from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
+from fastmcp.exceptions import FastMCPError, ToolError
+from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.utilities.components import FastMCPComponent
-from mcp.types import PaginatedRequest
-
 from src.auth.utils import ROLES_META_KEY, SCOPES_META_KEY, get_access_token
 from src.exceptions import AuthError
 
@@ -23,7 +21,8 @@ class AuthMiddleware(Middleware):
 
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         return await self._authorize_execute(
-            context, call_next,
+            context,
+            call_next,
             get_component=lambda ctx: ctx.fastmcp_context.fastmcp.get_tool(ctx.message.name),
             error_cls=ToolError,
         )
@@ -36,10 +35,7 @@ class AuthMiddleware(Middleware):
             return []
 
         results = await call_next(context)
-        return [
-            self._strip_meta(r) for r in results
-            if not self._should_trim(r, token.roles, token.scopes)
-        ]
+        return [self._strip_meta(r) for r in results if not self._should_trim(r, token.roles, token.scopes)]
 
     async def _authorize_execute(self, context, call_next, get_component: Callable, error_cls: type[FastMCPError]):
         try:
