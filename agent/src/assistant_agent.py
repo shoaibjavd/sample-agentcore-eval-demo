@@ -118,7 +118,8 @@ def _make_mcp_client(token: str) -> MCPClient | None:
     try:
         http_client = httpx.AsyncClient(timeout=120, headers={"Authorization": f"Bearer {token}"})
         client = MCPClient(
-            lambda hc=http_client: streamable_http_client(url=MCP_URL, http_client=hc)
+            lambda hc=http_client: streamable_http_client(url=MCP_URL, http_client=hc),
+            startup_timeout=120,
         )
         client.__enter__()
         return client
@@ -184,7 +185,8 @@ async def handle_request(payload, request_context: RequestContext = None):
             headers={"Authorization": f"Bearer {incoming_token}"}
         )
         user_mcp_client = MCPClient(
-            lambda hc=user_http_client: streamable_http_client(url=MCP_URL, http_client=hc)
+            lambda hc=user_http_client: streamable_http_client(url=MCP_URL, http_client=hc),
+            startup_timeout=120,
         )
         user_mcp_client.__enter__()
         mcp_client = user_mcp_client
