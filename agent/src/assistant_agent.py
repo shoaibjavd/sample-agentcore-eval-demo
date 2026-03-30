@@ -1,7 +1,7 @@
 from strands import Agent, tool
 from strands_tools import calculator
 from strands.tools.mcp import MCPClient
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamablehttp_client, streamable_http_client
 import os
 import json
 import time
@@ -72,9 +72,10 @@ async def get_mcp_token_m2m() -> str:
         return data["access_token"]
 
 
-def _extract_bearer_token(request_context: RequestContext) -> str | None:
-    """Extract Bearer token from request context headers."""
-    headers = request_context.request_headers or {}
+def _extract_bearer_token() -> str | None:
+    """Extract Bearer token from BedrockAgentCoreContext headers."""
+    from bedrock_agentcore.runtime import BedrockAgentCoreContext
+    headers = BedrockAgentCoreContext.get_request_headers() or {}
     auth = headers.get("Authorization") or headers.get("authorization") or ""
     return auth.removeprefix("Bearer ").strip() or None
 
@@ -91,15 +92,13 @@ def _is_user_token(token: str) -> bool:
 
 
 def _make_mcp_client(token: str) -> MCPClient | None:
-    """Create an MCPClient using the official streamablehttp_client transport."""
+    """Create an MCPClient with the given Bearer token."""
     if not MCP_URL:
         return None
     try:
-        headers = {"Authorization": f"Bearer {token}"}
+        http_client = httpx.AsyncClient(timeout=120, headers={"Authorization": f"Bearer {token}"})
         client = MCPClient(
-            lambda: streamablehttp_client(
-                MCP_URL, headers, timeout=timedelta(seconds=120), terminate_on_close=False
-            )
+            lambda hc=http_client: streamable_http_client(url=MCP_URL, http_client=hc)
         )
         client.__enter__()
         return client
@@ -168,11 +167,19 @@ async def handle_request(payload, request_context: RequestContext = None):
     """
     prompt = payload if isinstance(payload, str) else payload.get("prompt", str(payload))
 
-    incoming_token = _extract_bearer_token(request_context) if request_context else None
+    incoming_token = _extract_bearer_token()
     user_mcp_client = None
 
     if incoming_token and _is_user_token(incoming_token):
-        user_mcp_client = _make_mcp_client(incoming_token)
+        # Per-request MCP client with user's token for role-based access
+        user_http_client = httpx.AsyncClient(
+            timeout=120,
+            headers={"Authorization": f"Bearer {incoming_token}"}
+        )
+        user_mcp_client = MCPClient(
+            lambda hc=user_http_client: streamable_http_client(url=MCP_URL, http_client=hc)
+        )
+        user_mcp_client.__enter__()
         mcp_client = user_mcp_client
     else:
         mcp_client = await _get_m2m_mcp_client()

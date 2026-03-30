@@ -4,6 +4,8 @@ from pathlib import Path
 import aws_cdk as cdk
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_ecr_assets as ecr_assets
+from aws_cdk import aws_lambda as _lambda
+from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk.aws_bedrockagentcore import CfnRuntime
 from constructs import Construct
 
@@ -21,6 +23,13 @@ class CombinedStack(cdk.Stack):
         repo_root = Path(__file__).parent.parent
 
         # --- Shared Cognito Pool ---
+        pre_token_fn = _lambda.Function(
+            self, "PreTokenFn",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="index.handler",
+            code=_lambda.Code.from_asset(str(repo_root / "infrastructure" / "pre_token_lambda")),
+        )
+
         pool = cognito.UserPool(
             self, "SharedPool",
             user_pool_name=f"shared-{stage}-pool",
@@ -29,6 +38,16 @@ class CombinedStack(cdk.Stack):
                 email=cognito.StandardAttribute(required=True, mutable=True)
             ),
             custom_attributes={"roles": cognito.StringAttribute(mutable=True)},
+            lambda_triggers=cognito.UserPoolTriggers(
+                pre_token_generation=pre_token_fn,
+            ),
+        )
+
+        # Upgrade to V2_0 trigger (required for access token customization)
+        cfn_pool = pool.node.default_child
+        cfn_pool.add_property_override(
+            "LambdaConfig.PreTokenGenerationConfig",
+            {"LambdaArn": pre_token_fn.function_arn, "LambdaVersion": "V2_0"},
         )
 
         mcp_rs = pool.add_resource_server(
@@ -90,6 +109,18 @@ class CombinedStack(cdk.Stack):
 
         token_endpoint = f"https://{domain.domain_name}.auth.{region}.amazoncognito.com/oauth2/token"
 
+        # Store M2M client secret for agent → MCP auth
+        m2m_secret = secretsmanager.Secret(
+            self, "M2MClientSecret",
+            secret_name=f"agentcore/{stage}/m2m-client",
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+            secret_object_value={
+                "client_id": cdk.SecretValue.unsafe_plain_text(m2m_client.user_pool_client_id),
+                "client_secret": m2m_client.user_pool_client_secret,
+                "token_endpoint": cdk.SecretValue.unsafe_plain_text(token_endpoint),
+            },
+        )
+
         # --- MCP Server Runtime ---
         mcp_role = MCPServerRole(self, "MCPServerRole", description="Execution role for MCP server")
 
@@ -112,7 +143,10 @@ class CombinedStack(cdk.Stack):
             network_configuration=CfnRuntime.NetworkConfigurationProperty(network_mode="PUBLIC"),
             role_arn=mcp_role.role.role_arn,
             authorizer_configuration=authorizer,
-            environment_variables={"AWS_DEFAULT_REGION": region, "LOG_LEVEL": "DEBUG"},
+            request_header_configuration=CfnRuntime.RequestHeaderConfigurationProperty(
+                request_header_allowlist=["Authorization"]
+            ),
+            environment_variables={"AWS_DEFAULT_REGION": region, "LOG_LEVEL": "DEBUG", "DEPLOY_VERSION": "4", "USER_POOL_ID": pool.user_pool_id},
         )
 
         # --- Assistant Agent Runtime ---
@@ -137,6 +171,9 @@ class CombinedStack(cdk.Stack):
             network_configuration=CfnRuntime.NetworkConfigurationProperty(network_mode="PUBLIC"),
             role_arn=agent_role.role.role_arn,
             authorizer_configuration=authorizer,
+            request_header_configuration=CfnRuntime.RequestHeaderConfigurationProperty(
+                request_header_allowlist=["Authorization"]
+            ),
             environment_variables={
                 "AWS_DEFAULT_REGION": region,
                 "LOG_LEVEL": "DEBUG",
@@ -145,8 +182,12 @@ class CombinedStack(cdk.Stack):
                 "MCP_OAUTH_SCOPE": "mcp/invoke",
                 "MCP_CLIENT_ID": m2m_client.user_pool_client_id,
                 "MCP_TOKEN_ENDPOINT": token_endpoint,
+                "SECRET_ARN": m2m_secret.secret_arn,
+                "DEPLOY_VERSION": "13",
             },
         )
+
+        m2m_secret.grant_read(agent_role.role)
 
         # --- Outputs ---
         cdk.CfnOutput(self, "SharedUserPoolId", value=pool.user_pool_id)
