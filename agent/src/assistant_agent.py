@@ -1,3 +1,11 @@
+"""Assistant Agent — Strands-based agent deployed on Bedrock AgentCore.
+
+Connects to an MCP server for role-gated tools (finance, HR, datetime).
+Supports two auth modes:
+  - User tokens: forwarded to MCP server for per-user role-based access
+  - M2M tokens (CI/pipelines): shared cached token via Cognito client credentials
+"""
+
 from strands import Agent
 from strands_tools import calculator
 from strands.tools.mcp import MCPClient
@@ -16,6 +24,8 @@ from strands.models import BedrockModel
 
 app = BedrockAgentCoreApp()
 
+# --- MCP server connection config ---
+# MCP_SERVER_ARN is set by CDK; used to build the HTTPS invocation URL
 MCP_SERVER_ARN = os.getenv("MCP_SERVER_ARN")
 MCP_OAUTH_SCOPE = os.getenv("MCP_OAUTH_SCOPE", "mcp/invoke")
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "ap-southeast-2")
@@ -26,11 +36,17 @@ MCP_URL = (
     if _encoded_arn else None
 )
 
+# Simple in-memory cache for M2M tokens (refreshed before expiry)
 _m2m_token_cache = {"token": None, "expires_at": 0}
 
 
 async def get_mcp_token_m2m() -> str:
-    """Get M2M token from Cognito using client credentials stored in Secrets Manager."""
+    """Get M2M token from Cognito using client credentials.
+
+    Checks env var MCP_CLIENT_SECRET first; falls back to reading
+    client_id/client_secret/token_endpoint from Secrets Manager (SECRET_ARN).
+    Tokens are cached in-memory and refreshed 60s before expiry.
+    """
     if _m2m_token_cache["token"] and time.time() < _m2m_token_cache["expires_at"]:
         return _m2m_token_cache["token"]
 
@@ -81,7 +97,11 @@ def _extract_bearer_token() -> str | None:
 
 
 def _is_user_token(token: str) -> bool:
-    """Check if a JWT is a user token (has 'sub' claim) vs M2M."""
+    """Check if a JWT is a user token (has 'sub' claim) vs M2M.
+
+    Cognito user tokens include a 'sub' claim; M2M client_credentials tokens don't.
+    We decode without verification since AgentCore already validated the JWT.
+    """
     try:
         payload = token.split(".")[1]
         payload += "=" * (-len(payload) % 4)
