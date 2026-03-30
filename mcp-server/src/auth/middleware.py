@@ -54,6 +54,11 @@ class AuthMiddleware(Middleware):
         return await call_next(context)
 
     def _should_trim(self, component: FastMCPComponent, roles: list[str], scopes: list[str]) -> bool:
+        """Decide whether to hide a component from the caller.
+
+        M2M tokens (CI pipelines) have scopes but no roles — they bypass role checks
+        so all tools are available. User tokens must match required roles.
+        """
         # M2M tokens have scopes but no roles — bypass role checks
         if scopes and not roles:
             return False
@@ -65,6 +70,7 @@ class AuthMiddleware(Middleware):
         return False
 
     def _strip_meta(self, component: FastMCPComponent) -> FastMCPComponent:
+        """Remove internal auth metadata (Roles/Scopes) before returning to caller."""
         meta = component.meta or {}
         if ROLES_META_KEY not in meta and SCOPES_META_KEY not in meta:
             return component
