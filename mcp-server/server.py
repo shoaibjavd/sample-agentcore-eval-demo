@@ -51,20 +51,6 @@ def get_current_datetime(
         return f"Error: '{timezone_name}' is not a valid time zone."
 
 
-@mcp.tool(tags={"Geography"})
-def get_capital_city(
-    country: Annotated[str, Field(description="Country name", min_length=1)]
-) -> str:
-    """Returns the capital city of a given country."""
-    capitals = {
-        "united states": "Washington, D.C.", "us": "Washington, D.C.", "usa": "Washington, D.C.",
-        "australia": "Canberra", "france": "Paris", "germany": "Berlin", "japan": "Tokyo",
-        "china": "Beijing", "india": "New Delhi", "brazil": "Brasília", "canada": "Ottawa",
-        "uk": "London", "united kingdom": "London",
-    }
-    return capitals.get(country.lower(), f"Capital city for '{country}' not found")
-
-
 @mcp.tool(tags={"Finance"}, meta=auth_meta(roles=["FinanceUser"]))
 def get_stock_price(
     symbol: Annotated[str, Field(description="Stock symbol (e.g., AAPL, GOOGL)", min_length=1)],
