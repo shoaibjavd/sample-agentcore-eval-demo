@@ -29,14 +29,21 @@ class MCPServerRole(Construct):
                         ),
                         iam.PolicyStatement(
                             actions=["logs:CreateLogStream", "logs:PutLogEvents"],
-                            resources=[f"arn:aws:logs:{region}:{account}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*"],
+                            resources=[
+                                f"arn:aws:logs:{region}:{account}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*"
+                            ],
                         ),
                         iam.PolicyStatement(
                             actions=["ecr:GetAuthorizationToken", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
                             resources=["*"],
                         ),
                         iam.PolicyStatement(
-                            actions=["xray:PutTraceSegments", "xray:PutTelemetryRecords", "xray:GetSamplingRules", "xray:GetSamplingTargets"],
+                            actions=[
+                                "xray:PutTraceSegments",
+                                "xray:PutTelemetryRecords",
+                                "xray:GetSamplingRules",
+                                "xray:GetSamplingTargets",
+                            ],
                             resources=["*"],
                         ),
                     ]
@@ -81,10 +88,17 @@ class AgentCoreRuntimeRole(Construct):
                         ),
                         iam.PolicyStatement(
                             actions=["logs:CreateLogStream", "logs:PutLogEvents"],
-                            resources=[f"arn:aws:logs:{region}:{account}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*"],
+                            resources=[
+                                f"arn:aws:logs:{region}:{account}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*"
+                            ],
                         ),
                         iam.PolicyStatement(
-                            actions=["xray:PutTraceSegments", "xray:PutTelemetryRecords", "xray:GetSamplingRules", "xray:GetSamplingTargets"],
+                            actions=[
+                                "xray:PutTraceSegments",
+                                "xray:PutTelemetryRecords",
+                                "xray:GetSamplingRules",
+                                "xray:GetSamplingTargets",
+                            ],
                             resources=["*"],
                         ),
                         iam.PolicyStatement(
@@ -95,7 +109,10 @@ class AgentCoreRuntimeRole(Construct):
                         iam.PolicyStatement(
                             sid="BedrockModelInvocation",
                             actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-                            resources=["arn:aws:bedrock:*::foundation-model/*", f"arn:aws:bedrock:{region}:{account}:*"],
+                            resources=[
+                                "arn:aws:bedrock:*::foundation-model/*",
+                                f"arn:aws:bedrock:{region}:{account}:*",
+                            ],
                         ),
                         iam.PolicyStatement(
                             sid="A2AInvocation",
