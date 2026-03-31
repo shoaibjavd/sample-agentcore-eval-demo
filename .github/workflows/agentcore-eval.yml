@@ -86,35 +86,9 @@ jobs:
           echo "client_secret=$SECRET" >> "$GITHUB_OUTPUT"
 
       # --- Wait for runtimes ---
-      - name: Restart runtimes to pick up new container images
-        run: |
-          pip install boto3
-          python3 -c "
-          import boto3
-          client = boto3.client('bedrock-agentcore-control', region_name='${{ env.AWS_REGION }}')
-          for rid in ['${{ steps.cdk.outputs.mcp_id }}', '${{ steps.cdk.outputs.agent_id }}']:
-              rt = client.get_agent_runtime(agentRuntimeId=rid)
-              env_vars = rt.get('environmentVariables', {})
-              if rid == '${{ steps.cdk.outputs.agent_id }}':
-                  env_vars['MCP_CLIENT_SECRET'] = '${{ steps.secret.outputs.client_secret }}'
-              kwargs = dict(
-                  agentRuntimeId=rid,
-                  agentRuntimeArtifact=rt['agentRuntimeArtifact'],
-                  roleArn=rt['roleArn'],
-                  networkConfiguration=rt['networkConfiguration'],
-                  description=rt.get('description', ''),
-                  environmentVariables=env_vars,
-              )
-              if 'authorizerConfiguration' in rt:
-                  kwargs['authorizerConfiguration'] = rt['authorizerConfiguration']
-              if 'requestHeaderConfiguration' in rt:
-                  kwargs['requestHeaderConfiguration'] = rt['requestHeaderConfiguration']
-              client.update_agent_runtime(**kwargs)
-              print(f'Triggered update for {rid}')
-          "
-
       - name: Wait for runtimes READY
         run: |
+          pip install boto3
           python3 -c "
           import boto3, time, sys
           client = boto3.client('bedrock-agentcore-control', region_name='${{ env.AWS_REGION }}')
