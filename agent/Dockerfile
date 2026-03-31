@@ -13,7 +13,7 @@ COPY pyproject.toml pyproject.toml
 RUN uv pip install .
 
 ENV DOCKER_CONTAINER=1 \
-    BUILD_VERSION=3
+    BUILD_VERSION=4
 
 RUN useradd -m -u 1000 bedrock_agentcore
 USER bedrock_agentcore
