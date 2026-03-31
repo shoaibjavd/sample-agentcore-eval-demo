@@ -137,7 +137,7 @@ _m2m_initialized = False
 async def _get_m2m_mcp_client() -> MCPClient | None:
     """Get or initialize the shared M2M MCP client."""
     global _m2m_mcp_client, _m2m_initialized
-    if _m2m_initialized:
+    if _m2m_initialized and _m2m_mcp_client is not None:
         return _m2m_mcp_client
     _m2m_initialized = True
 

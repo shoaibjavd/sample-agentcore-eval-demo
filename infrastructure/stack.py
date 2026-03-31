@@ -194,7 +194,7 @@ class CombinedStack(cdk.Stack):
                 "MCP_CLIENT_ID": m2m_client.user_pool_client_id,
                 "MCP_TOKEN_ENDPOINT": token_endpoint,
                 "SECRET_ARN": m2m_secret.secret_arn,
-                "DEPLOY_VERSION": "14",
+                "DEPLOY_VERSION": "15",
             },
         )
 
