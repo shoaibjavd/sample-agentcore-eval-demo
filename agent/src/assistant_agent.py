@@ -21,11 +21,14 @@ from datetime import timedelta
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from bedrock_agentcore.runtime.context import RequestContext
 from strands.models import BedrockModel
+import logging
 
 app = BedrockAgentCoreApp()
 
 # --- MCP server connection config ---
 # MCP_SERVER_ARN is set by CDK; used to build the HTTPS invocation URL
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 MCP_SERVER_ARN = os.getenv("MCP_SERVER_ARN")
 MCP_OAUTH_SCOPE = os.getenv("MCP_OAUTH_SCOPE", "mcp/invoke")
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "ap-southeast-2")
@@ -137,7 +140,7 @@ _m2m_initialized = False
 async def _get_m2m_mcp_client() -> MCPClient | None:
     """Get or initialize the shared M2M MCP client."""
     global _m2m_mcp_client, _m2m_initialized
-    if _m2m_initialized and _m2m_mcp_client is not None:
+    if _m2m_initialized:
         return _m2m_mcp_client
     _m2m_initialized = True
 
@@ -157,11 +160,16 @@ async def _get_m2m_mcp_client() -> MCPClient | None:
 def get_tools(mcp_client: MCPClient | None):
     """Get all available tools."""
     tools = [calculator]
+    print(f"Before retrieving MCP tools, total tools: {len(tools)}")
+    logger.info(f"Before retrieving MCP tools, total tools: {len(tools)}")
     if mcp_client:
         try:
             tools.extend(mcp_client.list_tools_sync())
+            print(f"Retrieved {len(tools)-1} tools from MCP server")
+            logger.info(f"Retrieved {len(tools)-1} tools from MCP server")
         except Exception as e:
             print(f"Failed to list MCP tools: {e}")
+            logger.error(f"Failed to list MCP tools: {e}")
     return tools
 
 
@@ -188,9 +196,13 @@ async def handle_request(payload, request_context: RequestContext = None):
             lambda hc=user_http_client: streamable_http_client(url=MCP_URL, http_client=hc),
             startup_timeout=120,
         )
+        print("Using user token for MCP access")
+        logger.info("Using user token for MCP access")
         user_mcp_client.__enter__()
         mcp_client = user_mcp_client
     else:
+        print("No user token found; using shared M2M token for MCP access")
+        logger.info("No user token found; using shared M2M token for MCP access")
         mcp_client = await _get_m2m_mcp_client()
 
     try:

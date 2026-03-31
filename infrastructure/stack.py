@@ -157,7 +157,7 @@ class CombinedStack(cdk.Stack):
             request_header_configuration=CfnRuntime.RequestHeaderConfigurationProperty(
                 request_header_allowlist=["Authorization"]
             ),
-            environment_variables={"AWS_DEFAULT_REGION": region, "LOG_LEVEL": "DEBUG", "DEPLOY_VERSION": "6", "USER_POOL_ID": pool.user_pool_id},
+            environment_variables={"AWS_DEFAULT_REGION": region, "LOG_LEVEL": "DEBUG", "DEPLOY_VERSION": "9", "USER_POOL_ID": pool.user_pool_id},
         )
 
         # --- Assistant Agent Runtime ---
@@ -194,7 +194,7 @@ class CombinedStack(cdk.Stack):
                 "MCP_CLIENT_ID": m2m_client.user_pool_client_id,
                 "MCP_TOKEN_ENDPOINT": token_endpoint,
                 "SECRET_ARN": m2m_secret.secret_arn,
-                "DEPLOY_VERSION": "15",
+                "DEPLOY_VERSION": "18",
             },
         )
 
