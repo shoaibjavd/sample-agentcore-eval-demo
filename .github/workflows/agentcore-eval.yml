@@ -102,23 +102,30 @@ jobs:
               else:
                   sys.exit(1)
           print('Warming up MCP server...')
-          import urllib.parse, json
-          mcp_arn = '${{ steps.cdk.outputs.mcp_id }}'
-          # Invoke MCP server directly to trigger cold start
-          agentcore = boto3.client('bedrock-agentcore', region_name='${{ env.AWS_REGION }}')
-          mcp_runtime_arn = 'arn:aws:bedrock-agentcore:${{ env.AWS_REGION }}:' + boto3.client('sts').get_caller_identity()['Account'] + ':runtime/' + mcp_arn
+          import urllib.parse, json, subprocess
+          # Get OAuth token
+          token_resp = subprocess.run([
+              'curl', '-s', '-X', 'POST', '${{ steps.cdk.outputs.token_endpoint }}',
+              '-H', 'Content-Type: application/x-www-form-urlencoded',
+              '-d', 'grant_type=client_credentials&client_id=${{ steps.cdk.outputs.m2m_client_id }}&client_secret=${{ steps.secret.outputs.client_secret }}&scope=mcp/invoke',
+          ], capture_output=True, text=True)
+          token = json.loads(token_resp.stdout)['access_token']
+          mcp_arn = 'arn:aws:bedrock-agentcore:${{ env.AWS_REGION }}:' + boto3.client('sts').get_caller_identity()['Account'] + ':runtime/${{ steps.cdk.outputs.mcp_id }}'
+          encoded_arn = urllib.parse.quote(mcp_arn, safe='')
+          url = f'https://bedrock-agentcore.${{ env.AWS_REGION }}.amazonaws.com/runtimes/{encoded_arn}/invocations?qualifier=DEFAULT'
           for attempt in range(10):
-              try:
-                  resp = agentcore.invoke_agent_runtime(
-                      agentRuntimeArn=mcp_runtime_arn,
-                      qualifier='DEFAULT',
-                      payload=json.dumps({'method': 'initialize'}).encode(),
-                  )
-                  print(f'MCP server responded (attempt {attempt+1})')
+              resp = subprocess.run([
+                  'curl', '-s', '-o', '/dev/null', '-w', '%{http_code}',
+                  '-X', 'POST', url,
+                  '-H', f'Authorization: Bearer {token}',
+                  '-H', 'Content-Type: application/json',
+                  '-d', '{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"id\":1}',
+              ], capture_output=True, text=True)
+              code = resp.stdout.strip()
+              print(f'MCP warmup attempt {attempt+1}: HTTP {code}')
+              if code == '200':
                   break
-              except Exception as e:
-                  print(f'MCP warmup attempt {attempt+1}: {e}')
-                  time.sleep(15)
+              time.sleep(15)
           print('MCP server warm, proceeding...')
           "
 
