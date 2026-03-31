@@ -129,23 +129,23 @@ jobs:
           print('MCP server warm, proceeding...')
           "
 
-      # --- Run evaluation (disabled for manual testing) ---
-      # - name: Install eval dependencies
-      #   run: pip install boto3 requests bedrock-agentcore-starter-toolkit
+      # --- Run evaluation ---
+      - name: Install eval dependencies
+        run: pip install boto3 requests bedrock-agentcore-starter-toolkit
 
-      # - name: Run evaluation
-      #   working-directory: scripts
-      #   run: |
-      #     mkdir -p evals_results
-      #     python3 agentcore_eval.py
-      #   env:
-      #     AGENT_RUNTIME_ARN: ${{ steps.cdk.outputs.agent_arn }}
-      #     AGENT_RUNTIME_ID: ${{ steps.cdk.outputs.agent_id }}
-      #     TOKEN_ENDPOINT: ${{ steps.cdk.outputs.token_endpoint }}
-      #     OAUTH_CLIENT_ID: ${{ steps.cdk.outputs.m2m_client_id }}
-      #     OAUTH_CLIENT_SECRET: ${{ steps.secret.outputs.client_secret }}
-      #     OAUTH_SCOPE: "agentcore/invoke"
-      #     EVAL_THRESHOLD: "0.8"
+      - name: Run evaluation
+        working-directory: scripts
+        run: |
+          mkdir -p evals_results
+          python3 agentcore_eval.py
+        env:
+          AGENT_RUNTIME_ARN: ${{ steps.cdk.outputs.agent_arn }}
+          AGENT_RUNTIME_ID: ${{ steps.cdk.outputs.agent_id }}
+          TOKEN_ENDPOINT: ${{ steps.cdk.outputs.token_endpoint }}
+          OAUTH_CLIENT_ID: ${{ steps.cdk.outputs.m2m_client_id }}
+          OAUTH_CLIENT_SECRET: ${{ steps.secret.outputs.client_secret }}
+          OAUTH_SCOPE: "agentcore/invoke"
+          EVAL_THRESHOLD: "0.8"
 
       - name: Upload eval results
         if: always()
