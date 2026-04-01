@@ -121,8 +121,8 @@ def main():
     results = None
 
     print("Waiting for traces to propagate...")
-    time.sleep(30)
-    elapsed = 30
+    time.sleep(60)
+    elapsed = 60
 
     while elapsed <= max_wait:
         # Suppress noisy SDK output during retries
@@ -149,6 +149,9 @@ def main():
             break
         found = [e for e in evaluators if any(r.value is not None for r in results.results if r.evaluator_name == e)]
         missing = [e for e in evaluators if e not in found]
+        if not missing:
+            # All evaluators returned something — accept the results
+            break
         elapsed += interval
         print(f"Waiting for traces... ({elapsed}s / {max_wait}s) — missing: {', '.join(missing)}")
         time.sleep(interval)
