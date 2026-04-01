@@ -177,27 +177,8 @@ def main():
             print(f"{icon} {name:<33} {val:>5.1f}  {label}")
             if val < threshold:
                 failed = True
-                for r in results.results:
-                    if r.evaluator_name == name and r.value is not None:
-                        for attr in ['explanation', 'reason', 'context', 'metadata']:
-                            v = getattr(r, attr, None)
-                            if v:
-                                print(f"    {attr}: {str(v)[:500]}")
         else:
             print(f"⚠️  {name:<33}     -  no data")
-    print(f"{'─' * 50}")
-
-    # Dump full results for debugging
-    print(f"\n{'─' * 50}")
-    print("DEBUG: Full evaluation results")
-    print(f"{'─' * 50}")
-    for r in results.results:
-        print(f"  evaluator={r.evaluator_name} value={r.value} label={getattr(r, 'label', None)}")
-        for attr in dir(r):
-            if not attr.startswith('_') and attr not in ('evaluator_name', 'value', 'label'):
-                v = getattr(r, attr, None)
-                if v and not callable(v):
-                    print(f"    {attr}: {str(v)[:300]}")
     print(f"{'─' * 50}")
 
     if not has_results:
