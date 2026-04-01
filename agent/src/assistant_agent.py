@@ -24,6 +24,11 @@ from strands.models import BedrockModel
 import logging
 
 app = BedrockAgentCoreApp()
+model = BedrockModel(model_id=os.getenv("MODEL_ID", "au.anthropic.claude-haiku-4-5-20251001-v1:0"))
+
+_m2m_mcp_client = None
+_m2m_initialized = False
+
 
 # --- MCP server connection config ---
 # MCP_SERVER_ARN is set by CDK; used to build the HTTPS invocation URL
@@ -129,12 +134,6 @@ def _make_mcp_client(token: str) -> MCPClient | None:
     except Exception as e:
         print(f"Failed to initialize MCP client: {e}")
         return None
-
-
-model = BedrockModel(model_id=os.getenv("MODEL_ID", "au.anthropic.claude-haiku-4-5-20251001-v1:0"))
-
-_m2m_mcp_client = None
-_m2m_initialized = False
 
 
 async def _get_m2m_mcp_client() -> MCPClient | None:
