@@ -16,7 +16,7 @@ Reference implementation for running automated evaluations on an AgentCore-hoste
 
 1. **JWT validation (AgentCore):** Signature, issuer, expiry verified by the platform via `authorizer_configuration` before the request reaches your code.
 2. **Header passthrough:** `request_header_allowlist=["Authorization"]` on both runtimes ensures the JWT reaches the agent and MCP containers.
-3. **Role-based tool access (`AuthMiddleware`):** Uses `fastmcp.server.dependencies.get_http_headers()` to read the JWT, decodes claims, and enforces `custom:roles` against tool `meta`. M2M tokens (scopes but no roles) bypass; user tokens must have the required role.
+3. **Role-based tool access (`AuthMiddleware`):** Uses `fastmcp.server.dependencies.get_http_headers()` to read the JWT, decodes claims, and enforces `custom:roles` against tool `meta`. M2M tokens (scopes but no roles) bypass role checks; user tokens must have the required role.
 
 ## Repo Structure
 
@@ -62,10 +62,9 @@ Reference implementation for running automated evaluations on an AgentCore-hoste
 ## Prerequisites
 
 - AWS account with Bedrock AgentCore access
-- CDK bootstrapped (`npx cdk bootstrap`)
+- CDK bootstrapped (`cdk bootstrap`)
 - Docker installed and running
 - Python 3.12+
-- Node.js 18+
 
 ## Quick Start
 
@@ -83,7 +82,7 @@ source .venv/bin/activate
 pip install .
 
 # Deploy the stack
-npx cdk deploy --outputs-file outputs.json
+cdk deploy --outputs-file outputs.json
 ```
 
 CDK outputs include: `SharedUserPoolId`, `M2MClientId`, `UserClientId`, `TokenEndpoint`, `MCPRuntimeId`, `MCPRuntimeArn`, `AgentRuntimeId`, `AgentRuntimeArn`.
@@ -130,11 +129,11 @@ python3 agentcore_eval.py
 
 1. Create an IAM role for GitHub OIDC with permissions to deploy CDK stacks, manage AgentCore runtimes, and invoke Cognito.
 2. Add the role ARN as a GitHub secret: `AWS_ROLE_ARN`.
-3. Push a PR to `main` — the workflow deploys, evaluates, and tears down automatically.
+3. Push a PR to `main` — the workflow deploys, evaluates, posts results to the PR, and tears down automatically.
 
 ## Teardown
 
 ```bash
 source .venv/bin/activate
-npx cdk destroy --force
+cdk destroy --force
 ```
