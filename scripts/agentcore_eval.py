@@ -4,12 +4,16 @@ NOTE: When an AgentCore Runtime is configured with JWT/OAuth inbound auth,
 you CANNOT use the boto3 SDK to invoke it. You must make a direct HTTPS request
 with a Bearer token. The evaluation API itself is IAM-authenticated (boto3 works fine).
 """
+import contextlib
+import io
 import json
 import os
 import sys
+import time
 import uuid
 import urllib.parse
 
+import boto3
 import requests as http_requests
 from bedrock_agentcore_starter_toolkit import Evaluation
 
@@ -31,7 +35,6 @@ def get_token() -> str:
 
 def invoke_agent(agent_arn: str, session_id: str, prompt: str, region: str, token: str):
     """Invoke AgentCore Runtime via HTTPS with Bearer token (SDK doesn't support OAuth invocations)."""
-    import time
 
     escaped_arn = urllib.parse.quote(agent_arn, safe="")
     url = f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{escaped_arn}/invocations?qualifier=DEFAULT"
@@ -61,8 +64,6 @@ def invoke_agent(agent_arn: str, session_id: str, prompt: str, region: str, toke
 
 def wait_for_runtime(agent_id: str, region: str, max_wait: int = 600):
     """Wait for runtime to be READY before invoking."""
-    import boto3
-    import time
 
     client = boto3.client("bedrock-agentcore-control", region_name=region)
     elapsed = 0
@@ -108,7 +109,6 @@ def main():
         invoke_agent(agent_arn, session_id, item["prompt"], region, token)
 
     # Retry evaluations until traces are found (up to 10 min)
-    import time
     evaluators = [
         "Builtin.GoalSuccessRate",
         "Builtin.Correctness",
@@ -126,7 +126,6 @@ def main():
 
     while elapsed <= max_wait:
         # Suppress noisy SDK output during retries
-        import io, contextlib
         buf = io.StringIO()
         try:
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
@@ -150,7 +149,6 @@ def main():
         found = [e for e in evaluators if any(r.value is not None for r in results.results if r.evaluator_name == e)]
         missing = [e for e in evaluators if e not in found]
         if not missing:
-            # All evaluators returned something — accept the results
             break
         elapsed += interval
         print(f"Waiting for traces... ({elapsed}s / {max_wait}s) — missing: {', '.join(missing)}")

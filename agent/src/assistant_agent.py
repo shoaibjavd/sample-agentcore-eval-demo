@@ -17,7 +17,6 @@ import base64
 import urllib.parse
 import boto3
 import httpx
-from datetime import timedelta
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from bedrock_agentcore.runtime.context import RequestContext
 from strands.models import BedrockModel
