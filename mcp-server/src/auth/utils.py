@@ -1,66 +1,58 @@
-import logging
-from contextvars import ContextVar
+"""Token extraction from HTTP headers. AgentCore validates the JWT;
+we only decode the payload to read claims for role-based access."""
+
+import jwt
+from fastmcp.server.dependencies import get_http_headers
+from jwt import PyJWTError
 
 from src.auth.models import AccessToken
 from src.exceptions import AuthError
 
-logger = logging.getLogger(__name__)
-
-ROLES_META_KEY = "auth_roles"
-SCOPES_META_KEY = "auth_scopes"
-
-_access_token_context: ContextVar[AccessToken | None] = ContextVar("access_token", default=None)
+ROLES_META_KEY = "Roles"
+SCOPES_META_KEY = "Scopes"
 
 
-def auth_meta(roles: list[str] | None = None, scopes: list[str] | None = None) -> dict:
-    """Helper to create auth metadata for tools/resources/prompts."""
+def auth_meta(roles: list[str] | str | None = None, scopes: list[str] | str | None = None) -> dict:
+    """Build metadata dict for role/scope-gated tools."""
     meta = {}
     if roles:
-        meta[ROLES_META_KEY] = roles
+        meta[ROLES_META_KEY] = [roles] if isinstance(roles, str) else roles
     if scopes:
-        meta[SCOPES_META_KEY] = scopes
+        meta[SCOPES_META_KEY] = [scopes] if isinstance(scopes, str) else scopes
     return meta
 
 
 def get_access_token() -> AccessToken:
-    """Get the current access token from context."""
-    token = _access_token_context.get()
-    if token is None:
-        raise AuthError("No access token found in context")
-    return token
+    """Get the access token from the current HTTP request headers.
 
-
-def set_access_token(token: AccessToken) -> None:
-    """Set the access token in context."""
-    _access_token_context.set(token)
-
-
-def parse_jwt_claims(claims: dict) -> AccessToken:
+    AgentCore has already validated the token. We decode without signature
+    verification to extract claims for role-based authorization.
     """
-    Parse JWT claims into AccessToken.
-    Extracts roles from custom:roles claim (Cognito) and scopes from scp claim.
-    """
-    # Extract scopes
+    headers = get_http_headers(include={"authorization"})
+    if not headers:
+        raise AuthError("No HTTP headers found")
+
+    auth_header = headers.get("Authorization") or headers.get("authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise AuthError("No Authorization header found")
+
+    token = auth_header.removeprefix("Bearer ").strip()
+    try:
+        claims: dict = jwt.decode(token, options={"verify_signature": False})
+    except PyJWTError as e:
+        raise AuthError(f"Unable to decode access token: {e}") from e
+
+    # Cognito uses custom:roles (comma-separated string), Entra ID uses roles (list)
+    roles = claims.get("roles", [])
+    if not roles:
+        roles_str = claims.get("custom:roles", "")
+        roles = [r.strip() for r in roles_str.split(",") if r.strip()] if roles_str else []
+
     scopes = []
-    if "scp" in claims:
-        scp = claims["scp"]
-        scopes = scp if isinstance(scp, list) else scp.split() if isinstance(scp, str) else []
-    elif "scope" in claims:
-        scope = claims["scope"]
-        scopes = scope.split() if isinstance(scope, str) else scope if isinstance(scope, list) else []
+    for key in ("scp", "scope"):
+        val = claims.get(key, "")
+        if val:
+            scopes = val.split(" ") if isinstance(val, str) else val
+            break
 
-    # Extract roles from custom:roles (Cognito) or roles (Entra ID)
-    roles = []
-    if "custom:roles" in claims:
-        roles_str = claims["custom:roles"]
-        roles = [r.strip() for r in roles_str.split(",")] if roles_str else []
-    elif "roles" in claims:
-        r = claims["roles"]
-        roles = r if isinstance(r, list) else [r] if isinstance(r, str) else []
-
-    return AccessToken(
-        token=claims.get("jti", ""),
-        roles=roles,
-        scopes=scopes,
-        claims=claims
-    )
+    return AccessToken(token=token, roles=roles, scopes=scopes, claims=claims)

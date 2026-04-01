@@ -4,6 +4,8 @@ from pathlib import Path
 import aws_cdk as cdk
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_ecr_assets as ecr_assets
+from aws_cdk import aws_lambda as _lambda
+from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk.aws_bedrockagentcore import CfnRuntime
 from constructs import Construct
 
@@ -11,7 +13,16 @@ from infrastructure.roles import AgentCoreRuntimeRole, MCPServerRole
 
 
 class CombinedStack(cdk.Stack):
-    """Combined stack with shared Cognito pool for both agents."""
+    """Deploys the full AgentCore eval demo infrastructure:
+
+    1. Shared Cognito pool — JWT auth for both MCP server and assistant agent
+       - M2M client (client_credentials grant) for CI pipelines
+       - User client (auth code grant) for interactive users with role claims
+       - Pre-token Lambda injects custom:roles into access tokens
+    2. MCP Server Runtime — FastMCP server with role-gated tools (finance, HR, datetime)
+    3. Assistant Agent Runtime — Strands agent that connects to MCP server for tools
+    4. Secrets Manager — stores M2M client credentials for agent → MCP auth
+    """
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -21,6 +32,13 @@ class CombinedStack(cdk.Stack):
         repo_root = Path(__file__).parent.parent
 
         # --- Shared Cognito Pool ---
+        pre_token_fn = _lambda.Function(
+            self, "PreTokenFn",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="index.handler",
+            code=_lambda.Code.from_asset(str(repo_root / "infrastructure" / "pre_token_lambda")),
+        )
+
         pool = cognito.UserPool(
             self, "SharedPool",
             user_pool_name=f"shared-{stage}-pool",
@@ -29,6 +47,17 @@ class CombinedStack(cdk.Stack):
                 email=cognito.StandardAttribute(required=True, mutable=True)
             ),
             custom_attributes={"roles": cognito.StringAttribute(mutable=True)},
+            lambda_triggers=cognito.UserPoolTriggers(
+                pre_token_generation=pre_token_fn,
+            ),
+        )
+
+        # Upgrade to V2_0 trigger (required for access token customization —
+        # V1_0 only supports ID token customization, not access tokens)
+        cfn_pool = pool.node.default_child
+        cfn_pool.add_property_override(
+            "LambdaConfig.PreTokenGenerationConfig",
+            {"LambdaArn": pre_token_fn.function_arn, "LambdaVersion": "V2_0"},
         )
 
         mcp_rs = pool.add_resource_server(
@@ -52,6 +81,7 @@ class CombinedStack(cdk.Stack):
 
         user_client = pool.add_client(
             "UserClient", generate_secret=False,
+            auth_flows=cognito.AuthFlow(admin_user_password=True, user_srp=True),
             o_auth=cognito.OAuthSettings(
                 flows=cognito.OAuthFlows(authorization_code_grant=True, implicit_code_grant=True),
                 scopes=[
@@ -90,6 +120,18 @@ class CombinedStack(cdk.Stack):
 
         token_endpoint = f"https://{domain.domain_name}.auth.{region}.amazoncognito.com/oauth2/token"
 
+        # Store M2M client secret for agent → MCP auth
+        m2m_secret = secretsmanager.Secret(
+            self, "M2MClientSecret",
+            secret_name=f"agentcore/{stage}/m2m-client",
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+            secret_object_value={
+                "client_id": cdk.SecretValue.unsafe_plain_text(m2m_client.user_pool_client_id),
+                "client_secret": m2m_client.user_pool_client_secret,
+                "token_endpoint": cdk.SecretValue.unsafe_plain_text(token_endpoint),
+            },
+        )
+
         # --- MCP Server Runtime ---
         mcp_role = MCPServerRole(self, "MCPServerRole", description="Execution role for MCP server")
 
@@ -112,7 +154,10 @@ class CombinedStack(cdk.Stack):
             network_configuration=CfnRuntime.NetworkConfigurationProperty(network_mode="PUBLIC"),
             role_arn=mcp_role.role.role_arn,
             authorizer_configuration=authorizer,
-            environment_variables={"AWS_DEFAULT_REGION": region, "LOG_LEVEL": "DEBUG"},
+            request_header_configuration=CfnRuntime.RequestHeaderConfigurationProperty(
+                request_header_allowlist=["Authorization"]
+            ),
+            environment_variables={"AWS_DEFAULT_REGION": region, "LOG_LEVEL": "DEBUG", "DEPLOY_VERSION": "9", "USER_POOL_ID": pool.user_pool_id},
         )
 
         # --- Assistant Agent Runtime ---
@@ -137,6 +182,9 @@ class CombinedStack(cdk.Stack):
             network_configuration=CfnRuntime.NetworkConfigurationProperty(network_mode="PUBLIC"),
             role_arn=agent_role.role.role_arn,
             authorizer_configuration=authorizer,
+            request_header_configuration=CfnRuntime.RequestHeaderConfigurationProperty(
+                request_header_allowlist=["Authorization"]
+            ),
             environment_variables={
                 "AWS_DEFAULT_REGION": region,
                 "LOG_LEVEL": "DEBUG",
@@ -145,8 +193,12 @@ class CombinedStack(cdk.Stack):
                 "MCP_OAUTH_SCOPE": "mcp/invoke",
                 "MCP_CLIENT_ID": m2m_client.user_pool_client_id,
                 "MCP_TOKEN_ENDPOINT": token_endpoint,
+                "SECRET_ARN": m2m_secret.secret_arn,
+                "DEPLOY_VERSION": "18",
             },
         )
+
+        m2m_secret.grant_read(agent_role.role)
 
         # --- Outputs ---
         cdk.CfnOutput(self, "SharedUserPoolId", value=pool.user_pool_id)

@@ -86,33 +86,9 @@ jobs:
           echo "client_secret=$SECRET" >> "$GITHUB_OUTPUT"
 
       # --- Wait for runtimes ---
-      - name: Restart runtimes to pick up new container images
-        run: |
-          pip install boto3
-          python3 -c "
-          import boto3
-          client = boto3.client('bedrock-agentcore-control', region_name='${{ env.AWS_REGION }}')
-          for rid in ['${{ steps.cdk.outputs.mcp_id }}', '${{ steps.cdk.outputs.agent_id }}']:
-              rt = client.get_agent_runtime(agentRuntimeId=rid)
-              env_vars = rt.get('environmentVariables', {})
-              if rid == '${{ steps.cdk.outputs.agent_id }}':
-                  env_vars['MCP_CLIENT_SECRET'] = '${{ steps.secret.outputs.client_secret }}'
-              kwargs = dict(
-                  agentRuntimeId=rid,
-                  agentRuntimeArtifact=rt['agentRuntimeArtifact'],
-                  roleArn=rt['roleArn'],
-                  networkConfiguration=rt['networkConfiguration'],
-                  description=rt.get('description', ''),
-                  environmentVariables=env_vars,
-              )
-              if 'authorizerConfiguration' in rt:
-                  kwargs['authorizerConfiguration'] = rt['authorizerConfiguration']
-              client.update_agent_runtime(**kwargs)
-              print(f'Triggered update for {rid}')
-          "
-
       - name: Wait for runtimes READY
         run: |
+          pip install boto3
           python3 -c "
           import boto3, time, sys
           client = boto3.client('bedrock-agentcore-control', region_name='${{ env.AWS_REGION }}')
@@ -125,6 +101,32 @@ jobs:
                   time.sleep(10)
               else:
                   sys.exit(1)
+          print('Warming up MCP server...')
+          import urllib.parse, json, subprocess
+          # Get OAuth token
+          token_resp = subprocess.run([
+              'curl', '-s', '-X', 'POST', '${{ steps.cdk.outputs.token_endpoint }}',
+              '-H', 'Content-Type: application/x-www-form-urlencoded',
+              '-d', 'grant_type=client_credentials&client_id=${{ steps.cdk.outputs.m2m_client_id }}&client_secret=${{ steps.secret.outputs.client_secret }}&scope=mcp/invoke',
+          ], capture_output=True, text=True)
+          token = json.loads(token_resp.stdout)['access_token']
+          mcp_arn = 'arn:aws:bedrock-agentcore:${{ env.AWS_REGION }}:' + boto3.client('sts').get_caller_identity()['Account'] + ':runtime/${{ steps.cdk.outputs.mcp_id }}'
+          encoded_arn = urllib.parse.quote(mcp_arn, safe='')
+          url = f'https://bedrock-agentcore.${{ env.AWS_REGION }}.amazonaws.com/runtimes/{encoded_arn}/invocations?qualifier=DEFAULT'
+          for attempt in range(10):
+              resp = subprocess.run([
+                  'curl', '-s', '-o', '/dev/null', '-w', '%{http_code}',
+                  '-X', 'POST', url,
+                  '-H', f'Authorization: Bearer {token}',
+                  '-H', 'Content-Type: application/json',
+                  '-d', '{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"id\":1}',
+              ], capture_output=True, text=True)
+              code = resp.stdout.strip()
+              print(f'MCP warmup attempt {attempt+1}: HTTP {code}')
+              if code == '200':
+                  break
+              time.sleep(15)
+          print('MCP server warm, proceeding...')
           "
 
       # --- Run evaluation ---
@@ -192,9 +194,9 @@ jobs:
               body: body,
             });
 
-      # --- Teardown ---
-      - name: CDK destroy
-        if: always()
-        run: |
-          source .venv/bin/activate
-          npx cdk destroy --force
+      # --- Teardown (disabled to keep stack alive for manual testing) ---
+      # - name: CDK destroy
+      #   if: always()
+      #   run: |
+      #     source .venv/bin/activate
+      #     npx cdk destroy --force

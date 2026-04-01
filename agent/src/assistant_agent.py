@@ -1,7 +1,15 @@
-from strands import Agent, tool
+"""Assistant Agent — Strands-based agent deployed on Bedrock AgentCore.
+
+Connects to an MCP server for role-gated tools (finance, HR, datetime).
+Supports two auth modes:
+  - User tokens: forwarded to MCP server for per-user role-based access
+  - M2M tokens (CI/pipelines): shared cached token via Cognito client credentials
+"""
+
+from strands import Agent
 from strands_tools import calculator
 from strands.tools.mcp import MCPClient
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamablehttp_client, streamable_http_client
 import os
 import json
 import time
@@ -9,13 +17,22 @@ import base64
 import urllib.parse
 import boto3
 import httpx
-from datetime import timedelta
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from bedrock_agentcore.runtime.context import RequestContext
 from strands.models import BedrockModel
+import logging
 
 app = BedrockAgentCoreApp()
+model = BedrockModel(model_id=os.getenv("MODEL_ID", "au.anthropic.claude-haiku-4-5-20251001-v1:0"))
 
+_m2m_mcp_client = None
+_m2m_initialized = False
+
+
+# --- MCP server connection config ---
+# MCP_SERVER_ARN is set by CDK; used to build the HTTPS invocation URL
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 MCP_SERVER_ARN = os.getenv("MCP_SERVER_ARN")
 MCP_OAUTH_SCOPE = os.getenv("MCP_OAUTH_SCOPE", "mcp/invoke")
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "ap-southeast-2")
@@ -26,11 +43,17 @@ MCP_URL = (
     if _encoded_arn else None
 )
 
+# Simple in-memory cache for M2M tokens (refreshed before expiry)
 _m2m_token_cache = {"token": None, "expires_at": 0}
 
 
 async def get_mcp_token_m2m() -> str:
-    """Get M2M token from Cognito using client credentials stored in Secrets Manager."""
+    """Get M2M token from Cognito using client credentials.
+
+    Checks env var MCP_CLIENT_SECRET first; falls back to reading
+    client_id/client_secret/token_endpoint from Secrets Manager (SECRET_ARN).
+    Tokens are cached in-memory and refreshed 60s before expiry.
+    """
     if _m2m_token_cache["token"] and time.time() < _m2m_token_cache["expires_at"]:
         return _m2m_token_cache["token"]
 
@@ -72,15 +95,20 @@ async def get_mcp_token_m2m() -> str:
         return data["access_token"]
 
 
-def _extract_bearer_token(request_context: RequestContext) -> str | None:
-    """Extract Bearer token from request context headers."""
-    headers = request_context.request_headers or {}
+def _extract_bearer_token() -> str | None:
+    """Extract Bearer token from BedrockAgentCoreContext headers."""
+    from bedrock_agentcore.runtime import BedrockAgentCoreContext
+    headers = BedrockAgentCoreContext.get_request_headers() or {}
     auth = headers.get("Authorization") or headers.get("authorization") or ""
     return auth.removeprefix("Bearer ").strip() or None
 
 
 def _is_user_token(token: str) -> bool:
-    """Check if a JWT is a user token (has 'sub' claim) vs M2M."""
+    """Check if a JWT is a user token (has 'sub' claim) vs M2M.
+
+    Cognito user tokens include a 'sub' claim; M2M client_credentials tokens don't.
+    We decode without verification since AgentCore already validated the JWT.
+    """
     try:
         payload = token.split(".")[1]
         payload += "=" * (-len(payload) % 4)
@@ -91,40 +119,20 @@ def _is_user_token(token: str) -> bool:
 
 
 def _make_mcp_client(token: str) -> MCPClient | None:
-    """Create an MCPClient using the official streamablehttp_client transport."""
+    """Create an MCPClient with the given Bearer token."""
     if not MCP_URL:
         return None
     try:
-        headers = {"Authorization": f"Bearer {token}"}
+        http_client = httpx.AsyncClient(timeout=120, headers={"Authorization": f"Bearer {token}"})
         client = MCPClient(
-            lambda: streamablehttp_client(
-                MCP_URL, headers, timeout=timedelta(seconds=120), terminate_on_close=False
-            )
+            lambda hc=http_client: streamable_http_client(url=MCP_URL, http_client=hc),
+            startup_timeout=120,
         )
         client.__enter__()
         return client
     except Exception as e:
         print(f"Failed to initialize MCP client: {e}")
         return None
-
-
-@tool
-def weather(location: str) -> str:
-    """Get current weather for a location."""
-    data = {
-        "sydney": "Sunny, 28°C",
-        "london": "Cloudy, 12°C",
-        "new york": "Partly cloudy, 18°C",
-        "tokyo": "Rainy, 15°C",
-        "paris": "Clear, 20°C",
-    }
-    return data.get(location.lower(), f"{location}: Sunny, 22°C")
-
-
-model = BedrockModel(model_id=os.getenv("MODEL_ID", "au.anthropic.claude-haiku-4-5-20251001-v1:0"))
-
-_m2m_mcp_client = None
-_m2m_initialized = False
 
 
 async def _get_m2m_mcp_client() -> MCPClient | None:
@@ -149,12 +157,17 @@ async def _get_m2m_mcp_client() -> MCPClient | None:
 
 def get_tools(mcp_client: MCPClient | None):
     """Get all available tools."""
-    tools = [calculator, weather]
+    tools = [calculator]
+    print(f"Before retrieving MCP tools, total tools: {len(tools)}")
+    logger.info(f"Before retrieving MCP tools, total tools: {len(tools)}")
     if mcp_client:
         try:
             tools.extend(mcp_client.list_tools_sync())
+            print(f"Retrieved {len(tools)-1} tools from MCP server")
+            logger.info(f"Retrieved {len(tools)-1} tools from MCP server")
         except Exception as e:
             print(f"Failed to list MCP tools: {e}")
+            logger.error(f"Failed to list MCP tools: {e}")
     return tools
 
 
@@ -168,20 +181,39 @@ async def handle_request(payload, request_context: RequestContext = None):
     """
     prompt = payload if isinstance(payload, str) else payload.get("prompt", str(payload))
 
-    incoming_token = _extract_bearer_token(request_context) if request_context else None
+    incoming_token = _extract_bearer_token()
     user_mcp_client = None
 
     if incoming_token and _is_user_token(incoming_token):
-        user_mcp_client = _make_mcp_client(incoming_token)
+        # Per-request MCP client with user's token for role-based access
+        user_http_client = httpx.AsyncClient(
+            timeout=120,
+            headers={"Authorization": f"Bearer {incoming_token}"}
+        )
+        user_mcp_client = MCPClient(
+            lambda hc=user_http_client: streamable_http_client(url=MCP_URL, http_client=hc),
+            startup_timeout=120,
+        )
+        print("Using user token for MCP access")
+        logger.info("Using user token for MCP access")
+        user_mcp_client.__enter__()
         mcp_client = user_mcp_client
     else:
+        print("No user token found; using shared M2M token for MCP access")
+        logger.info("No user token found; using shared M2M token for MCP access")
         mcp_client = await _get_m2m_mcp_client()
 
     try:
         agent = Agent(
             model=model,
             tools=get_tools(mcp_client),
-            system_prompt="You're a helpful assistant with math, weather, geography, finance, and HR tools."
+            system_prompt=(
+                "You are an office assistant for internal staff. You have access to tools for "
+                "arithmetic calculations, date and time lookups, stock price retrieval, and "
+                "department headcount queries. Use the appropriate tool for each request. "
+                "Respond concisely and professionally. If a request falls outside your "
+                "available tools, say so clearly rather than guessing."
+            )
         )
         result = await agent.invoke_async(prompt)
         return str(result)
