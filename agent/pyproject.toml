@@ -3,10 +3,10 @@ name = "assistant-agent"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "strands-agents[otel]",
-    "bedrock-agentcore",
-    "strands-agents-tools",
+    "strands-agents[otel]==1.28.0",
+    "bedrock-agentcore==1.4.1",
+    "strands-agents-tools==0.2.21",
     "aws-opentelemetry-distro",
-    "httpx>=0.27.0",
+    "httpx==0.28.1",
     "boto3>=1.34.0",
 ]
