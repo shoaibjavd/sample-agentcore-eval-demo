@@ -7,6 +7,7 @@ from aws_cdk import aws_ecr_assets as ecr_assets
 from aws_cdk import aws_lambda as _lambda
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk.aws_bedrockagentcore import CfnRuntime
+import cdk_nag
 from constructs import Construct
 
 from infrastructure.roles import AgentCoreRuntimeRole, MCPServerRole
@@ -34,7 +35,7 @@ class CombinedStack(cdk.Stack):
         # --- Shared Cognito Pool ---
         pre_token_fn = _lambda.Function(
             self, "PreTokenFn",
-            runtime=_lambda.Runtime.PYTHON_3_12,
+            runtime=_lambda.Runtime.PYTHON_3_14,
             handler="index.handler",
             code=_lambda.Code.from_asset(str(repo_root / "infrastructure" / "pre_token_lambda")),
         )
@@ -49,6 +50,13 @@ class CombinedStack(cdk.Stack):
             custom_attributes={"roles": cognito.StringAttribute(mutable=True)},
             lambda_triggers=cognito.UserPoolTriggers(
                 pre_token_generation=pre_token_fn,
+            ),
+            password_policy=cognito.PasswordPolicy(
+                min_length=8,
+                require_uppercase=True,
+                require_lowercase=True,
+                require_digits=True,
+                require_symbols=True,
             ),
         )
 
@@ -133,7 +141,7 @@ class CombinedStack(cdk.Stack):
         )
 
         # --- MCP Server Runtime ---
-        mcp_role = MCPServerRole(self, "MCPServerRole", description="Execution role for MCP server")
+        mcp_role = MCPServerRole(self, "MCPServerRole", description="Execution role for MCP server", runtime_name=f"mcp_server_{stage}")
 
         mcp_image = ecr_assets.DockerImageAsset(
             self, "MCPImage",
@@ -161,7 +169,12 @@ class CombinedStack(cdk.Stack):
         )
 
         # --- Assistant Agent Runtime ---
-        agent_role = AgentCoreRuntimeRole(self, "AgentRole", description="Execution role for assistant agent")
+        agent_role = AgentCoreRuntimeRole(
+            self, "AgentRole",
+            description="Execution role for assistant agent",
+            runtime_name=f"assistant_agent_{stage}",
+            model_id="au.anthropic.claude-haiku-4-5-20251001-v1:0",
+        )
 
         agent_image = ecr_assets.DockerImageAsset(
             self, "AgentImage",
@@ -209,3 +222,42 @@ class CombinedStack(cdk.Stack):
         cdk.CfnOutput(self, "MCPRuntimeArn", value=mcp_runtime.attr_agent_runtime_arn)
         cdk.CfnOutput(self, "AgentRuntimeId", value=agent_runtime.attr_agent_runtime_id)
         cdk.CfnOutput(self, "AgentRuntimeArn", value=agent_runtime.attr_agent_runtime_arn)
+
+        # --- cdk-nag suppressions ---
+        cdk_nag.NagSuppressions.add_resource_suppressions(
+            pool,
+            [
+                cdk_nag.NagPackSuppression(id="AwsSolutions-COG2", reason="MFA not required for dev/demo environment with pre-created test users"),
+                cdk_nag.NagPackSuppression(id="AwsSolutions-COG8", reason="Cognito Plus tier not needed for dev/demo — advanced security features are not required"),
+            ],
+        )
+        cdk_nag.NagSuppressions.add_resource_suppressions(
+            m2m_secret,
+            [cdk_nag.NagPackSuppression(id="AwsSolutions-SMG4", reason="M2M client secret is managed by Cognito User Pool; independent rotation is not applicable")],
+        )
+        cdk_nag.NagSuppressions.add_resource_suppressions(
+            pre_token_fn,
+            [cdk_nag.NagPackSuppression(id="AwsSolutions-IAM4", reason="AWSLambdaBasicExecutionRole is acceptable for a simple pre-token-generation Lambda with no other resource access")],
+            apply_to_children=True,
+        )
+        # Custom resource Lambda created by CDK for DescribeUserPoolClient
+        cdk_nag.NagSuppressions.add_stack_suppressions(
+            self,
+            [cdk_nag.NagPackSuppression(id="AwsSolutions-IAM4", reason="CDK-managed custom resource Lambda uses AWSLambdaBasicExecutionRole; not user-controlled", applies_to=["Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"])],
+        )
+        # Remaining wildcards are required by AWS API design:
+        # - ecr:GetAuthorizationToken requires Resource:* (API constraint)
+        # - xray:Put*/Get* requires Resource:* (API constraint)
+        # - cloudwatch:PutMetricData requires Resource:* (scoped by condition key)
+        # - logs:DescribeLogGroups scoped to /aws/bedrock-agentcore/runtimes/* (narrowest possible)
+        # - A2A InvokeAgentRuntime uses agent-runtime/* due to circular dependency (MCP ARN unknown at role creation time)
+        cdk_nag.NagSuppressions.add_resource_suppressions(
+            mcp_role.role,
+            [cdk_nag.NagPackSuppression(id="AwsSolutions-IAM5", reason="ecr:GetAuthorizationToken, xray, and logs:DescribeLogGroups require Resource:* per AWS API constraints. Log streams scoped to runtime name prefix.")],
+            apply_to_children=True,
+        )
+        cdk_nag.NagSuppressions.add_resource_suppressions(
+            agent_role.role,
+            [cdk_nag.NagPackSuppression(id="AwsSolutions-IAM5", reason="ecr:GetAuthorizationToken, xray, cloudwatch:PutMetricData (condition-scoped), and logs:DescribeLogGroups require Resource:* per AWS API constraints. Bedrock scoped to specific model. A2A uses agent-runtime/* due to circular deploy dependency.")],
+            apply_to_children=True,
+        )
