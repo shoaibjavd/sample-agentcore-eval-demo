@@ -1,19 +1,15 @@
-FROM --platform=linux/arm64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+FROM --platform=linux/arm64 public.ecr.aws/docker/library/python:3.12-slim
 WORKDIR /app
 
-ENV UV_SYSTEM_PYTHON=1 \
-    UV_COMPILE_BYTECODE=1 \
-    UV_NO_PROGRESS=1 \
-    PYTHONUNBUFFERED=1 \
+ENV PYTHONUNBUFFERED=1 \
     DOCKER_CONTAINER=1 \
     AWS_REGION=ap-southeast-2 \
     AWS_DEFAULT_REGION=ap-southeast-2
 
 COPY pyproject.toml pyproject.toml
-RUN uv pip install .
+RUN pip install --no-cache-dir .
 
-ENV DOCKER_CONTAINER=1 \
-    BUILD_VERSION=6
+ENV BUILD_VERSION=7
 
 RUN useradd -m -u 1000 bedrock_agentcore
 USER bedrock_agentcore
