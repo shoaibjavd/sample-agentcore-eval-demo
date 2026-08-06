@@ -49,18 +49,39 @@ class AuthMiddleware(Middleware):
 
         component = await get_component(context)
         if self._should_trim(component, token.roles, token.scopes):
+            logger.warning(
+                "Access denied to tool",
+                extra={"tool": getattr(component, "name", "unknown"), "roles": token.roles, "scopes": token.scopes},
+            )
             raise error_cls("Access denied")
 
+        logger.info(
+            "Tool execution authorized",
+            extra={"tool": getattr(component, "name", "unknown"), "roles": token.roles, "scopes": token.scopes},
+        )
         return await call_next(context)
 
     def _should_trim(self, component: FastMCPComponent, roles: list[str], scopes: list[str]) -> bool:
         """Decide whether to hide a component from the caller.
 
         M2M tokens (CI pipelines) have scopes but no roles — they bypass role checks
-        so all tools are available. User tokens must match required roles.
+        so all tools are available for evaluation purposes.
+        User tokens must match required roles.
+
+        Security: M2M access is logged for audit trail. The M2M client is restricted
+        to the mcp/invoke scope at the Cognito level, limiting token acquisition to
+        authorized clients only.
         """
-        # M2M tokens have scopes but no roles — bypass role checks
+        # M2M tokens have scopes but no roles — bypass role checks for CI evaluation
         if scopes and not roles:
+            # Must have explicit mcp/invoke scope to proceed
+            if "mcp/invoke" not in scopes:
+                logger.warning("M2M token missing mcp/invoke scope — denying access")
+                return True
+            logger.info(
+                "M2M access granted to tool",
+                extra={"tool": getattr(component, "name", "unknown"), "scopes": scopes},
+            )
             return False
         meta = component.meta or {}
         if ROLES_META_KEY in meta and not any(r in roles for r in meta[ROLES_META_KEY]):
