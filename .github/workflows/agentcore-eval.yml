@@ -25,8 +25,39 @@ env:
   AWS_REGION: ap-southeast-2
 
 jobs:
+  # Static security scanning (TS017). Reports only for now: `continue-on-error: true`
+  # means a finding will not block the PR. Triage the current findings, then remove that
+  # line to turn this into a real gate.
+  security-scan:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install scanners
+        run: pip install --quiet bandit==1.8.6 checkov==3.2.499 detect-secrets==1.5.0
+
+      - name: Bandit (Python SAST)
+        run: bandit -r agent/src mcp-server scripts -ll
+
+      - name: Checkov (Dockerfiles + IaC)
+        run: checkov -d . --framework dockerfile cloudformation --quiet --compact
+
+      - name: detect-secrets
+        run: detect-secrets scan --exclude-files '\.venv|cdk\.out|package-lock\.json'
+
   evaluate:
     runs-on: ubuntu-latest
+    # TS003: a same-repo PR can run this workflow under the AWS OIDC role. Naming an
+    # environment lets you require reviewer approval before credentials are issued —
+    # configure "Required reviewers" on the `dev` environment in repo settings, otherwise
+    # this is a label only. Also scope the role's trust policy to this repo and to
+    # `pull_request` refs so a fork or another repo cannot assume it.
+    environment: dev
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -74,17 +105,6 @@ jobs:
           echo "m2m_client_id=$(jq -r ".[\"$STACK\"].M2MClientId" outputs.json)" >> "$GITHUB_OUTPUT"
           echo "pool_id=$(jq -r ".[\"$STACK\"].SharedUserPoolId" outputs.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Get M2M client secret
-        id: secret
-        run: |
-          SECRET=$(aws cognito-idp describe-user-pool-client \
-            --user-pool-id "${{ steps.cdk.outputs.pool_id }}" \
-            --client-id "${{ steps.cdk.outputs.m2m_client_id }}" \
-            --region "${{ env.AWS_REGION }}" \
-            --query 'UserPoolClient.ClientSecret' --output text)
-          echo "::add-mask::$SECRET"
-          echo "client_secret=$SECRET" >> "$GITHUB_OUTPUT"
-
       # --- Wait for runtimes ---
       - name: Wait for runtimes READY
         run: |
@@ -103,11 +123,18 @@ jobs:
                   sys.exit(1)
           print('Warming up MCP server...')
           import urllib.parse, json, subprocess
-          # Get OAuth token
+          # Read client credentials from Secrets Manager rather than interpolating the
+          # secret into a command line, where it would appear in the process list and
+          # risk landing in logs (TS014).
+          sm = boto3.client('secretsmanager', region_name='${{ env.AWS_REGION }}')
+          creds = json.loads(sm.get_secret_value(SecretId='agentcore/dev/m2m-client')['SecretString'])
           token_resp = subprocess.run([
               'curl', '-s', '-X', 'POST', '${{ steps.cdk.outputs.token_endpoint }}',
               '-H', 'Content-Type: application/x-www-form-urlencoded',
-              '-d', 'grant_type=client_credentials&client_id=${{ steps.cdk.outputs.m2m_client_id }}&client_secret=${{ steps.secret.outputs.client_secret }}&scope=mcp/invoke',
+              '--data-urlencode', 'grant_type=client_credentials',
+              '--data-urlencode', f"client_id={creds['client_id']}",
+              '--data-urlencode', f"client_secret={creds['client_secret']}",
+              '--data-urlencode', 'scope=mcp/invoke',
           ], capture_output=True, text=True)
           token = json.loads(token_resp.stdout)['access_token']
           mcp_arn = 'arn:aws:bedrock-agentcore:${{ env.AWS_REGION }}:' + boto3.client('sts').get_caller_identity()['Account'] + ':runtime/${{ steps.cdk.outputs.mcp_id }}'
@@ -142,12 +169,13 @@ jobs:
           AGENT_RUNTIME_ARN: ${{ steps.cdk.outputs.agent_arn }}
           AGENT_RUNTIME_ID: ${{ steps.cdk.outputs.agent_id }}
           TOKEN_ENDPOINT: ${{ steps.cdk.outputs.token_endpoint }}
-          OAUTH_CLIENT_ID: ${{ steps.cdk.outputs.m2m_client_id }}
-          OAUTH_CLIENT_SECRET: ${{ steps.secret.outputs.client_secret }}
+          # The script reads client_id/client_secret straight from Secrets Manager, so the
+          # secret value never enters a step output, env file, or log (TS014).
+          M2M_SECRET_ID: agentcore/dev/m2m-client
           # mcp/invoke is required by the MCP AuthMiddleware for M2M tokens
           # (see mcp-server/src/auth/middleware.py); agentcore/invoke authorizes
           # the agent runtime invocation. Both are granted to the M2M client.
-          OAUTH_SCOPE: "mcp/invoke agentcore/invoke"
+          OAUTH_SCOPE: "mcp/invoke mcp/finance mcp/hr agentcore/invoke"
           EVAL_THRESHOLD: "0.8"
 
       - name: Upload eval results

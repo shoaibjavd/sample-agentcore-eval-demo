@@ -65,6 +65,7 @@ class AgentCoreRuntimeRole(Construct):
         construct_id: str,
         description: str,
         model_id: str = DEFAULT_MODEL_ID,
+        a2a_target_runtime_arns: list[str] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -82,6 +83,18 @@ class AgentCoreRuntimeRole(Construct):
                 for r in self.INFERENCE_PROFILE_REGIONS
             ],
         ]
+
+        # InvokeAgentRuntime targets. Each runtime ARN also needs its endpoint sub-resource
+        # (".../runtime-endpoint/*") because invocations address a qualifier.
+        if a2a_target_runtime_arns:
+            a2a_resources = [
+                arn_part
+                for arn in a2a_target_runtime_arns
+                for arn_part in (arn, f"{arn}/runtime-endpoint/*")
+            ]
+        else:
+            # No known targets: grant nothing rather than the whole account.
+            a2a_resources = [f"arn:aws:bedrock-agentcore:{region}:{account}:agent-runtime/__none__"]
 
         self.role = iam.Role(
             self,
@@ -130,7 +143,10 @@ class AgentCoreRuntimeRole(Construct):
                         iam.PolicyStatement(
                             sid="A2AInvocation",
                             actions=["bedrock-agentcore:InvokeAgentRuntime"],
-                            resources=[f"arn:aws:bedrock-agentcore:{region}:{account}:agent-runtime/*"],
+                            # Scoped to the specific target runtime(s) this agent calls.
+                            # The MCP runtime ARN is known at synth time, so the previous
+                            # account-wide agent-runtime/* grant was not required (TS007).
+                            resources=a2a_resources,
                         ),
                     ]
                 )

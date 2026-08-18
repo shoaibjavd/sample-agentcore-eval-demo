@@ -1,4 +1,6 @@
-FROM --platform=linux/arm64 public.ecr.aws/docker/library/python:3.12-slim
+# Base image pinned by digest (TS011). Tag 3.12-slim is mutable; the digest below
+# is python:3.12-slim as verified for linux/arm64. Update deliberately.
+FROM --platform=linux/arm64 public.ecr.aws/docker/library/python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
 
 # checkov:skip=CKV_DOCKER_2: Liveness/readiness probing is performed by the Bedrock
 # AgentCore runtime, not the image. The slim base has no curl/wget, so an in-image

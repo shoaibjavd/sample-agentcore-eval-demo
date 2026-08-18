@@ -51,20 +51,20 @@ def get_current_datetime(
         return f"Error: '{timezone_name}' is not a valid time zone."
 
 
-@mcp.tool(tags={"Finance"}, meta=auth_meta(roles=["FinanceUser"]))
+@mcp.tool(tags={"Finance"}, meta=auth_meta(roles=["FinanceUser"], scopes=["mcp/finance"]))
 def get_stock_price(
     symbol: Annotated[str, Field(description="Stock symbol (e.g., AAPL, GOOGL)", min_length=1)],
 ) -> str:
-    """Returns mock stock price. Requires FinanceUser role."""
+    """Returns the current stock price for a stock symbol."""
     prices = {"aapl": "$175.50", "googl": "$142.30", "msft": "$380.20", "amzn": "$178.90"}
     return f"{symbol.upper()}: {prices.get(symbol.lower(), '$100.00')}"
 
 
-@mcp.tool(tags={"HR"}, meta=auth_meta(roles=["HRUser"]))
+@mcp.tool(tags={"HR"}, meta=auth_meta(roles=["HRUser"], scopes=["mcp/hr"]))
 def get_employee_count(
     department: Annotated[str, Field(description="Department name", min_length=1)],
 ) -> str:
-    """Returns mock employee count. Requires HRUser role."""
+    """Returns the employee count for a department."""
     counts = {"engineering": "150 employees", "sales": "80 employees", "hr": "25 employees", "finance": "40 employees"}
     return f"{department}: {counts.get(department.lower(), '50 employees')}"
 

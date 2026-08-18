@@ -122,7 +122,7 @@ Run the `notebooks/01_deploy_and_test_rbac.ipynb` notebook to deploy the stack a
 # Get M2M token (client secret stored in Secrets Manager: agentcore/dev/m2m-client)
 TOKEN=$(curl -s -X POST "$TOKEN_ENDPOINT" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=client_credentials&client_id=$M2M_CLIENT_ID&client_secret=$M2M_CLIENT_SECRET&scope=mcp/invoke agentcore/invoke" \
+  -d "grant_type=client_credentials&client_id=$M2M_CLIENT_ID&client_secret=$M2M_CLIENT_SECRET&scope=mcp/invoke mcp/finance mcp/hr agentcore/invoke" \
   | jq -r '.access_token')
 
 # Invoke agent
@@ -141,7 +141,7 @@ export AGENT_RUNTIME_ID="..."
 export TOKEN_ENDPOINT="..."
 export OAUTH_CLIENT_ID="..."
 export OAUTH_CLIENT_SECRET="..."
-export OAUTH_SCOPE="mcp/invoke agentcore/invoke"
+export OAUTH_SCOPE="mcp/invoke mcp/finance mcp/hr agentcore/invoke"
 export EVAL_THRESHOLD="0.8"
 
 pip install boto3 requests bedrock-agentcore-starter-toolkit
