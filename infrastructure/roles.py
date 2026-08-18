@@ -32,8 +32,14 @@ class MCPServerRole(Construct):
                             resources=[f"arn:aws:logs:{region}:{account}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*"],
                         ),
                         iam.PolicyStatement(
-                            actions=["ecr:GetAuthorizationToken", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
-                            resources=["*"],
+                            sid="ECRTokenAccess",
+                            actions=["ecr:GetAuthorizationToken"],
+                            resources=["*"],  # ecr:GetAuthorizationToken does not support resource-level permissions
+                        ),
+                        iam.PolicyStatement(
+                            sid="ECRImageAccess",
+                            actions=["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
+                            resources=[f"arn:aws:ecr:{region}:{account}:repository/*"],
                         ),
                         iam.PolicyStatement(
                             actions=["xray:PutTraceSegments", "xray:PutTelemetryRecords", "xray:GetSamplingRules", "xray:GetSamplingTargets"],
@@ -46,12 +52,36 @@ class MCPServerRole(Construct):
 
 
 class AgentCoreRuntimeRole(Construct):
-    def __init__(self, scope: Construct, construct_id: str, description: str, **kwargs) -> None:
+    # Cross-region inference profile used by the agent. The "au." prefix routes to the
+    # foundation model in the regions listed below (verified via
+    # `aws bedrock get-inference-profile`), so InvokeModel must be granted on both the
+    # profile ARN and the underlying foundation model in each of those regions.
+    DEFAULT_MODEL_ID = "au.anthropic.claude-haiku-4-5-20251001-v1:0"
+    INFERENCE_PROFILE_REGIONS = ("ap-southeast-2", "ap-southeast-4")
+
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        description: str,
+        model_id: str = DEFAULT_MODEL_ID,
+        **kwargs,
+    ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         stack = cdk.Stack.of(self)
         region = stack.region
         account = stack.account
+
+        # Strip the cross-region routing prefix ("au.") to get the base foundation model id.
+        base_model_id = model_id.split(".", 1)[1] if model_id.split(".", 1)[0].isalpha() and "." in model_id else model_id
+        bedrock_model_resources = [
+            f"arn:aws:bedrock:{region}:{account}:inference-profile/{model_id}",
+            *[
+                f"arn:aws:bedrock:{r}::foundation-model/{base_model_id}"
+                for r in self.INFERENCE_PROFILE_REGIONS
+            ],
+        ]
 
         self.role = iam.Role(
             self,
@@ -95,7 +125,7 @@ class AgentCoreRuntimeRole(Construct):
                         iam.PolicyStatement(
                             sid="BedrockModelInvocation",
                             actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-                            resources=["arn:aws:bedrock:*::foundation-model/*", f"arn:aws:bedrock:{region}:{account}:*"],
+                            resources=bedrock_model_resources,
                         ),
                         iam.PolicyStatement(
                             sid="A2AInvocation",

@@ -62,9 +62,14 @@ Reference implementation for running automated evaluations on an AgentCore-hoste
 ## Prerequisites
 
 - AWS account with Bedrock AgentCore access
-- CDK bootstrapped (`cdk bootstrap`)
-- Docker installed and running
 - Python 3.12+
+- Node.js 20+ and the AWS CDK CLI (`npm install -g aws-cdk`) — the CLI is a Node package and is
+  *not* installed by `pip install .`, which only provides the Python `aws-cdk-lib` used by `app.py`
+- CDK bootstrapped in `ap-southeast-2` (`cdk bootstrap aws://<account-id>/ap-southeast-2`) — the
+  region is pinned in `app.py`, so bootstrapping only your default region is not enough
+- Docker installed and running. Both images build for `linux/arm64`: this is native on Apple
+  Silicon, but on x86 hosts you need emulation (`docker run --privileged --rm tonistiigi/binfmt --install arm64`),
+  which is what the CI workflow's QEMU step provides
 
 ## Quick Start
 
@@ -73,17 +78,35 @@ The fastest way to get started is via the notebooks:
 1. Open `notebooks/01_deploy_and_test_rbac.ipynb` — deploys the stack, sets user passwords, and runs role-based access tests.
 2. Open `notebooks/02_evaluation_pipeline.ipynb` — runs the evaluation pipeline with M2M token and quality gates.
 
+Both notebooks deploy via `npx --yes cdk`, so they do not need a globally installed CDK CLI — but
+they do still need the `.venv` created below (they run CDK with `.venv/bin` on `PATH`), plus Node.js
+and a running Docker daemon. Each notebook deploys the stack in its first cells and **runs
+`cdk destroy --force` in its final cell**, so run them one at a time and skip the last cell if you
+want the stack to stay up.
+
 ## Deployment
 
 ```bash
-# Install CDK dependencies
+# Install the Python CDK libraries that app.py imports (aws-cdk-lib, constructs)
 python3 -m venv .venv
 source .venv/bin/activate
 pip install .
 
-# Deploy the stack
+# Deploy the stack (requires the CDK CLI — see Prerequisites)
 cdk deploy --outputs-file outputs.json
+
+# No global CDK CLI? Run it via npx instead:
+# npx aws-cdk@2 deploy --outputs-file outputs.json
 ```
+
+The stack deploys into `ap-southeast-2` (pinned in `app.py`) using the account resolved from your
+current credentials. Deployment builds and pushes both container images to ECR before creating the
+AgentCore runtimes, so allow around 10-15 minutes on a first run.
+
+Both runtimes stay in `CREATING` for a few minutes after `cdk deploy` returns, and invoking one
+before it reaches `READY` fails with `424 Failed Dependency`. `scripts/agentcore_eval.py` polls for
+`READY` before invoking; the notebooks instead pause for a fixed 30s, which is usually but not
+always enough — if a notebook invocation returns 424, re-run that cell.
 
 CDK outputs include: `SharedUserPoolId`, `M2MClientId`, `UserClientId`, `TokenEndpoint`, `MCPRuntimeId`, `MCPRuntimeArn`, `AgentRuntimeId`, `AgentRuntimeArn`.
 
@@ -99,7 +122,7 @@ Run the `notebooks/01_deploy_and_test_rbac.ipynb` notebook to deploy the stack a
 # Get M2M token (client secret stored in Secrets Manager: agentcore/dev/m2m-client)
 TOKEN=$(curl -s -X POST "$TOKEN_ENDPOINT" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=client_credentials&client_id=$M2M_CLIENT_ID&client_secret=$M2M_CLIENT_SECRET&scope=agentcore/invoke" \
+  -d "grant_type=client_credentials&client_id=$M2M_CLIENT_ID&client_secret=$M2M_CLIENT_SECRET&scope=mcp/invoke agentcore/invoke" \
   | jq -r '.access_token')
 
 # Invoke agent
@@ -118,7 +141,7 @@ export AGENT_RUNTIME_ID="..."
 export TOKEN_ENDPOINT="..."
 export OAUTH_CLIENT_ID="..."
 export OAUTH_CLIENT_SECRET="..."
-export OAUTH_SCOPE="agentcore/invoke"
+export OAUTH_SCOPE="mcp/invoke agentcore/invoke"
 export EVAL_THRESHOLD="0.8"
 
 pip install boto3 requests bedrock-agentcore-starter-toolkit
@@ -128,7 +151,7 @@ python3 agentcore_eval.py
 ## CI/CD Setup
 
 1. Create an IAM role for GitHub OIDC with permissions to deploy CDK stacks, manage AgentCore runtimes, and invoke Cognito.
-2. Add the role ARN as a GitHub secret: `AWS_ROLE_ARN`.
+2. Add the role ARN as a GitHub secret: `AWS_ROLE_ARN`. <!-- pragma: allowlist secret --> <!-- reason: GitHub Actions secret NAME, not a credential value -->
 3. Push a PR to `main` — the workflow deploys, evaluates, posts results to the PR, and tears down automatically.
 
 ## Teardown

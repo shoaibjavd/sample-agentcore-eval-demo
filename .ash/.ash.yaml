@@ -1,0 +1,20 @@
+# Automated Security Helper (ASH) configuration
+#
+# Suppressions are limited to reviewed false positives. Each entry records why the
+# finding is not a real risk. Do not add suppressions for unreviewed findings.
+#
+# fixtures/sample_traces.json is pre-collected OpenTelemetry span data used by
+# scripts/evaluate_stored_traces.py for deterministic, offline evaluation. It contains
+# high-entropy telemetry correlation identifiers (traceId / spanId) that entropy
+# heuristics cannot distinguish from credentials. Live credential material has been
+# removed from the fixture (access key ID and account ID are redacted).
+
+global_settings:
+  suppressions:
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: fixtures/sample_traces.json
+      reason: "OTel traceId (32-hex) / spanId (16-hex) telemetry correlation identifiers, not credentials"
+
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: fixtures/sample_traces.json
+      reason: "AgentCore runtime resource-name suffix in aws.log.group.names, not a credential"

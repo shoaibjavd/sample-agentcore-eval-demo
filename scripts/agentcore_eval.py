@@ -28,6 +28,7 @@ def get_token() -> str:
             "client_secret": os.environ["OAUTH_CLIENT_SECRET"],
             "scope": os.environ.get("OAUTH_SCOPE", ""),
         },
+        timeout=30,
     )
     resp.raise_for_status()
     return resp.json()["access_token"]
@@ -46,9 +47,10 @@ def invoke_agent(agent_arn: str, session_id: str, prompt: str, region: str, toke
     payload = json.dumps({"prompt": prompt})
 
     # Retry on 424 (MCP server dependency not yet available)
+    # timeout is generous: agent invocations run a full LLM turn plus MCP tool calls.
     max_retries = 10
     for attempt in range(max_retries):
-        resp = http_requests.post(url, headers=headers, data=payload)
+        resp = http_requests.post(url, headers=headers, data=payload, timeout=300)
         if resp.status_code != 424 or attempt == max_retries - 1:
             if not resp.ok:
                 print(f"HTTP {resp.status_code}: {resp.text}")

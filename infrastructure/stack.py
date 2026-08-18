@@ -11,6 +11,10 @@ from constructs import Construct
 
 from infrastructure.roles import AgentCoreRuntimeRole, MCPServerRole
 
+# Single source of truth for the model: used both for the agent runtime env var and to
+# scope the Bedrock IAM grant, so the two cannot drift apart.
+MODEL_ID = AgentCoreRuntimeRole.DEFAULT_MODEL_ID
+
 
 class CombinedStack(cdk.Stack):
     """Deploys the full AgentCore eval demo infrastructure:
@@ -94,9 +98,11 @@ class CombinedStack(cdk.Stack):
         user_client.node.add_dependency(mcp_rs)
         user_client.node.add_dependency(agent_rs)
 
+        # Domain prefix must be globally unique per region. "shared-*" is too generic and
+        # collides with unrelated stacks that claim the same name in the same account.
         domain = pool.add_domain(
             "Domain",
-            cognito_domain=cognito.CognitoDomainOptions(domain_prefix=f"shared-{stage}-{cdk.Aws.ACCOUNT_ID}"),
+            cognito_domain=cognito.CognitoDomainOptions(domain_prefix=f"agentcore-{stage}-{cdk.Aws.ACCOUNT_ID}"),
         )
 
         # Pre-create users
@@ -161,7 +167,11 @@ class CombinedStack(cdk.Stack):
         )
 
         # --- Assistant Agent Runtime ---
-        agent_role = AgentCoreRuntimeRole(self, "AgentRole", description="Execution role for assistant agent")
+        agent_role = AgentCoreRuntimeRole(
+            self, "AgentRole",
+            description="Execution role for assistant agent",
+            model_id=MODEL_ID,
+        )
 
         agent_image = ecr_assets.DockerImageAsset(
             self, "AgentImage",
@@ -188,7 +198,7 @@ class CombinedStack(cdk.Stack):
             environment_variables={
                 "AWS_DEFAULT_REGION": region,
                 "LOG_LEVEL": "DEBUG",
-                "MODEL_ID": "au.anthropic.claude-haiku-4-5-20251001-v1:0",
+                "MODEL_ID": MODEL_ID,
                 "MCP_SERVER_ARN": mcp_runtime.attr_agent_runtime_arn,
                 "MCP_OAUTH_SCOPE": "mcp/invoke",
                 "MCP_CLIENT_ID": m2m_client.user_pool_client_id,

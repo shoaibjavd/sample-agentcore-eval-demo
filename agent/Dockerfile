@@ -1,4 +1,9 @@
 FROM --platform=linux/arm64 public.ecr.aws/docker/library/python:3.12-slim
+
+# checkov:skip=CKV_DOCKER_2: Liveness/readiness probing is performed by the Bedrock
+# AgentCore runtime, not the image. The slim base has no curl/wget, so an in-image
+# HEALTHCHECK would add a dependency without being consumed by the platform.
+
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
