@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ASH-Analysis (v2) — SampleAgentcoreEvalDemo</title>
+<style>
+  :root { --ok:#1b7f37; --warn:#b35c00; --bad:#b3261e; --muted:#5f6368; --line:#e0e0e0; }
+  body { font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         max-width:1100px; margin:2rem auto; padding:0 1.5rem; color:#202124; line-height:1.55; }
+  h1 { border-bottom:3px solid #232f3e; padding-bottom:.4rem; margin-bottom:.2rem; }
+  h2 { margin-top:2.2rem; border-bottom:1px solid var(--line); padding-bottom:.3rem; }
+  h3 { margin-top:1.5rem; }
+  code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.88em; }
+  pre { background:#f6f8fa; padding:.7rem 1rem; border-radius:6px; overflow-x:auto; border:1px solid var(--line); }
+  table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.92em; }
+  th,td { border:1px solid var(--line); padding:.5rem .6rem; text-align:left; vertical-align:top; }
+  th { background:#f1f3f4; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:10px; font-size:.76em; font-weight:600; color:#fff; white-space:nowrap; }
+  .p-ok{background:var(--ok);} .p-warn{background:var(--warn);} .p-bad{background:var(--bad);} .p-muted{background:var(--muted);}
+  .meta { color:var(--muted); font-size:.9em; }
+  .banner { border-left:4px solid var(--warn); background:#fff8e1; padding:.8rem 1rem; margin:1.2rem 0; border-radius:4px; }
+  .banner.ok { border-left-color:var(--ok); background:#e8f5e9; }
+  .banner.bad { border-left-color:var(--bad); background:#fdecea; }
+  .kpi { display:flex; gap:1rem; flex-wrap:wrap; margin:1rem 0; }
+  .kpi div { border:1px solid var(--line); border-radius:6px; padding:.7rem 1rem; min-width:110px; text-align:center; }
+  .kpi b { display:block; font-size:1.7rem; }
+  .fix { color:var(--ok); font-weight:600; }
+  td.num { text-align:right; }
+</style>
+</head>
+<body>
+
+<h1>ASH-Analysis (v2)</h1>
+<p class="meta">
+  <strong>Source:</strong> Automated Security Helper (ASH) <strong>v3.5.9</strong> — real scan, installed from
+  <code>github.com/awslabs/automated-security-helper</code>. Supplemented by cdk-nag 2.38.2, checkov 3.2.499
+  and pip-audit run out-of-band for coverage ASH reported as MISSING. &nbsp;|&nbsp;
+  <strong>Report:</strong> ASH-20260819-v2
+</p>
+<p class="meta">
+  <strong>Target:</strong> <code>f0a8484</code>. The core remediation is merged to <code>main</code> on both
+  remotes (GitHub <code>9892781</code> via PR #4, Amazon <code>997f298</code>); three follow-up commits
+  — CI role documentation and a workflow quoting fix — are open in PR #5.
+  <strong>Baseline:</strong> v1 report (ASH v3.5.8, 2026-08-10).
+  <strong>Latest scan:</strong> 2026-08-19, against the merged code.
+</p>
+
+<h2>Overall result — after remediation</h2>
+
+<div class="banner ok">
+  <strong>ASH v3.5.9 exits 0. Every scanner PASSED with zero unsuppressed findings.</strong>
+  All 25 CRITICAL findings from the v1 report are resolved. The one genuine finding this scan discovered
+  (missing HTTP timeouts in a notebook) is fixed. A dependency audit ASH could not perform found and closed
+  13 real advisories. Verified functionally at the same commit: role-based access 6/6, all four evaluators 1.0
+  &mdash; and independently in CI, where run <code>32217755632</code> on PR #5 passed both jobs end to end with
+  the quality gate posting 4/4 at 1.00.
+</div>
+
+<div class="kpi">
+  <div><b>0</b><span class="pill p-ok">actionable findings</span></div>
+  <div><b>0</b><span class="pill p-ok">critical / high</span></div>
+  <div><b>14</b><span class="pill p-ok">suppressed w/ reason</span></div>
+  <div><b>13</b><span class="pill p-ok">advisories patched</span></div>
+  <div><b>2</b><span class="pill p-bad">items still open</span></div>
+</div>
+
+<h3>Current scanner results</h3>
+<p class="meta">ASH v3.5.9 against <code>f0a8484</code>, 2026-08-19. Exit code 0.</p>
+<table>
+  <tr><th>Scanner</th><th class="num">Suppressed</th><th class="num">Critical</th><th class="num">High</th><th class="num">Medium</th><th class="num">Low</th><th class="num">Actionable</th><th>Result</th></tr>
+  <tr><td>bandit</td><td class="num">1</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="pill p-ok">PASSED</span></td></tr>
+  <tr><td>checkov</td><td class="num">2</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="pill p-ok">PASSED</span></td></tr>
+  <tr><td>detect-secrets</td><td class="num">11</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="pill p-ok">PASSED</span></td></tr>
+  <tr><td>semgrep</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="pill p-ok">PASSED</span></td></tr>
+  <tr><td>npm-audit</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="pill p-ok">PASSED</span></td></tr>
+  <tr><td>cdk-nag / cfn-nag / grype / syft / opengrep</td><td colspan="6" class="meta">dependency unavailable inside ASH — covered out-of-band, Sections 3&ndash;4</td><td><span class="pill p-muted">MISSING</span></td></tr>
+</table>
+
+<h3>What remains open</h3>
+<p>
+  Neither open item is a vulnerability in the code, and neither is reported by the scan above. Both are stated
+  here so the exit-0 result is not mistaken for "nothing left to do".
+</p>
+<table>
+  <tr><th>Item</th><th>Severity</th><th>Why it is open</th></tr>
+  <tr>
+    <td><strong>TS003</strong> — CI role trust scoping</td>
+    <td><span class="pill p-bad">High</span></td>
+    <td><strong>Two of three enabling conditions are now closed.</strong> The role's trust policy is scoped to
+        <code>sub = repo:&lt;owner&gt;/&lt;repo&gt;:environment:dev</code> with <code>StringEquals</code>, so a token
+        is only issued to a job declaring that environment; and <code>iam:*</code> on <code>Resource:*</code> has
+        been replaced by role operations scoped to the stack's own role names, verified with
+        <code>iam simulate-principal-policy</code> (escalation paths return <code>implicitDeny</code>).
+        <br><strong>Outstanding:</strong> required reviewers on the <code>dev</code> environment. Until that is
+        set the scoping is inert as a gate, because the workflow itself declares <code>environment: dev</code> —
+        so any PR that triggers it produces a matching subject. Confirmed by the CI run, which proceeded without
+        pausing for approval. It can no longer escalate to account takeover, but it can still obtain credentials.
+        This is a GitHub setting, not something the repository can enforce.</td>
+  </tr>
+  <tr>
+    <td><strong>Scanner config not versioned</strong></td>
+    <td><span class="pill p-warn">Low (noise)</span></td>
+    <td><code>.ash/.ash.yaml</code> was untracked and gitignored, so exclusions and the recorded reasons do not
+        travel with the code. Measured: with it present ASH exits 0; from a fresh clone ASH exits 2 with 69
+        findings — about 65 build/run artifacts and 14 reviewed false positives. Identical code either way; no
+        vulnerability is hidden. CI will see 69.</td>
+  </tr>
+</table>
+
+<h3>Known but not scanner-detected</h3>
+<p>
+  Two review findings were raised after this report's figures were produced and merged without being addressed.
+  Neither is critical and neither is a vulnerability, but they are open:
+</p>
+<ul>
+  <li><strong>JWKS fetch blocks the event loop.</strong> <code>PyJWKClient</code> is constructed with default
+      <code>lifespan=300</code> and <code>timeout=30</code>, so the key set is re-fetched synchronously every
+      5 minutes from inside async middleware, and an unreachable endpoint could stall request handling for up to
+      30 seconds. Availability, not security. Cheapest mitigation is
+      <code>lifespan=3600, timeout=5</code>; the complete fix offloads the fetch off the event loop.</li>
+  <li><strong><code>detect-secrets scan</code> always exits 0.</strong> It reports to stdout and never fails, so
+      removing <code>continue-on-error</code> would <em>not</em> make secret scanning a gate, even though the
+      other steps would then gate correctly. Proper gating needs a committed <code>.secrets.baseline</code> with
+      <code>detect-secrets-hook</code>.</li>
+</ul>
+
+<h3>How the scan result changed</h3>
+<table>
+  <tr><th>Run</th><th>Scope</th><th class="num">Actionable</th><th>Exit</th></tr>
+  <tr><td>1</td><td>Working tree as-is, <em>before</em> remediation</td><td class="num">59</td><td><span class="pill p-muted">2</span></td></tr>
+  <tr><td>2</td><td>Same commit, generated artifacts moved aside manually</td><td class="num">4</td><td><span class="pill p-muted">2</span></td></tr>
+  <tr><td>3</td><td>After remediation + <code>ignore_paths</code> in <code>.ash/.ash.yaml</code></td><td class="num"><strong>0</strong></td><td><span class="pill p-ok">0</span></td></tr>
+  <tr><td>4</td><td>Re-scan after adding <code>pip-audit</code> to CI — no regression</td><td class="num"><strong>0</strong></td><td><span class="pill p-ok">0</span></td></tr>
+  <tr><td>5</td><td><strong>Current</strong> — code at <code>f0a8484</code></td><td class="num"><strong>0</strong></td><td><span class="pill p-ok">0</span></td></tr>
+  <tr><td>—</td><td><em>Fresh-clone equivalent</em>: same code, scanner config absent (as the repo now stands)</td><td class="num">69</td><td><span class="pill p-bad">2</span></td></tr>
+</table>
+<p>
+  The 59 &rarr; 4 drop was <strong>scan hygiene, not security</strong>: of run 1's 68 unsuppressed results, only
+  one sat in a git-tracked file. 43 were in <code>notebooks/eval_output*.json</code> (OTel traces written by
+  running notebook 02), 22 in <code>cdk.out/</code> and ASH's own converted directory, 2 in a stray
+  <code>cdk-nag-report.csv</code>. Run 3 made that exclusion permanent in config rather than manual; runs 4 and 5 confirm it holds.
+</p>
+
+<h3>Run 3 — scanner results when the exclusions first landed</h3>
+<table>
+  <tr><th>Scanner</th><th class="num">Suppressed</th><th class="num">Critical</th><th class="num">High</th><th class="num">Medium</th><th class="num">Low</th><th class="num">Actionable</th><th>Result</th></tr>
+  <tr><td>bandit</td><td class="num">1</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="pill p-ok">PASSED</span></td></tr>
+  <tr><td>checkov</td><td class="num">2</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="pill p-ok">PASSED</span></td></tr>
+  <tr><td>detect-secrets</td><td class="num">11</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="pill p-ok">PASSED</span></td></tr>
+  <tr><td>semgrep</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="pill p-ok">PASSED</span></td></tr>
+  <tr><td>npm-audit</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="pill p-ok">PASSED</span></td></tr>
+  <tr><td>cdk-nag / cfn-nag / grype / syft / opengrep</td><td colspan="6" class="meta">dependency unavailable inside ASH — covered out-of-band, see Sections 3–4</td><td><span class="pill p-muted">MISSING</span></td></tr>
+</table>
+
+<h2>Section 1 — Fixed in this remediation round</h2>
+
+<h3>The finding this scan discovered</h3>
+<p>
+  <strong><code>B113</code> &times;2 — HTTP calls without a timeout in <code>notebooks/02_evaluation_pipeline.ipynb</code>.</strong>
+  <span class="fix">RESOLVED</span> — <code>timeout=30</code> on the token request, <code>timeout=300</code> on the
+  agent invocation.
+</p>
+<p>
+  Worth noting <em>why</em> this was missed in v1: the equivalent calls in
+  <code>scripts/agentcore_eval.py</code> were fixed then, but the same pattern in the notebook was not.
+  A standalone bandit run over <code>.py</code> files reports 0 — ASH converts notebooks to Python and scans
+  them, which is the only reason it surfaced.
+</p>
+
+<h3>Dependency vulnerabilities — the coverage gap that mattered</h3>
+<div class="banner ok">
+  <strong>Resolved.</strong> v2 flagged the absence of dependency scanning as the highest-value follow-up, reasoning that pinning
+  every dependency to an exact version freezes known-good versions <em>and</em> any CVE they carry.
+  Running <code>pip-audit</code> inside both built images confirmed exactly that:
+  <strong>13 distinct advisories across 3 packages, all frozen in place by the v1 pinning work.</strong>
+  (Per image, <code>pip-audit</code> reported 8 vulnerabilities in the agent image and 11 in the MCP image;
+  the totals overlap because <code>pip</code> itself is present in both.)
+</div>
+<table>
+  <tr><th>Package</th><th>Pinned was</th><th>Advisories</th><th>Now</th></tr>
+  <tr><td><code>PyJWT</code> (MCP)</td><td>2.11.0</td>
+      <td>PYSEC-2026-120, -175, -176, -177, -178, -179 &nbsp;<strong>(6)</strong></td><td class="fix">2.13.0</td></tr>
+  <tr><td><code>bedrock-agentcore</code> (agent)</td><td>1.4.1</td>
+      <td>PYSEC-2026-2395, PYSEC-2026-3551 &nbsp;<strong>(2)</strong></td><td class="fix">1.18.1</td></tr>
+  <tr><td><code>pip</code> (both base images)</td><td>25.0.1</td>
+      <td>PYSEC-2026-196, -1795, -1796, -2875, -2876 &nbsp;<strong>(5)</strong></td><td class="fix">upgraded during build</td></tr>
+</table>
+<p>
+  <strong>The PyJWT finding is the significant one.</strong> PyJWT is the library performing the JWT signature
+  verification added for TS002, so running a vulnerable version directly undermines the control it
+  implements. Both images now report <em>"No known vulnerabilities found"</em>.
+</p>
+<p class="meta">
+  The <code>bedrock-agentcore</code> jump (1.4.1 &rarr; 1.18.1) is large and was verified rather than assumed:
+  the image builds, <code>assistant_agent</code> imports, the entrypoint registers, and both notebooks pass
+  (RBAC 6/6; all four evaluators 1.0).
+</p>
+
+<h3>Scan hygiene</h3>
+<p>
+  <code>.ash/.ash.yaml</code> separates two distinct mechanisms — <code>ignore_paths</code> for files that
+  should not be scanned (build output, run artifacts) and <code>suppressions</code> for reviewed false
+  positives in files that <em>are</em> scanned. Each entry carries a reason.
+  <br><strong>Status: no longer in the repository.</strong> The file was subsequently untracked and added to
+  <code>.gitignore</code>, so it exists locally only. The distinction still matters when reading the numbers
+  below: roughly 65 of the 69 findings a fresh clone now reports are <em>artifact noise</em> that
+  <code>ignore_paths</code> addressed, not risk that <code>suppressions</code> excused.
+</p>
+<p class="meta">
+  Implementation note: <code>path: "cdk.out"</code> does not match a directory and left 21 findings in place.
+  It must be <code>cdk.out/**</code>. Worth knowing before editing that file.
+</p>
+
+<h3>Everything resolved since v1</h3>
+<table>
+  <tr><th>v1 finding</th><th>Rule</th><th>Status</th><th>Evidence</th></tr>
+  <tr><td>Hardcoded AWS access key ID + account ID in fixture</td><td><code>SECRET-AWS-ACCESS-KEY</code>, <code>CKV_SECRET_2</code></td><td class="fix">RESOLVED</td><td>No AWS-key finding in any of the three runs</td></tr>
+  <tr><td>Unpinned (mutable) GitHub Action tags &times;8</td><td><code>github-actions-mutable-action-tag</code></td><td class="fix">RESOLVED</td><td>semgrep PASSED; 10/10 <code>uses:</code> are 40-char SHAs</td></tr>
+  <tr><td>MCP container runs as root</td><td><code>CKV_DOCKER_3</code></td><td class="fix">RESOLVED</td><td>checkov PASSED; image runs <code>uid=1000</code></td></tr>
+  <tr><td>Missing HEALTHCHECK &times;2</td><td><code>CKV_DOCKER_2</code></td><td class="fix">SUPPRESSED</td><td>ASH counts 2 as suppressed — inline <code>checkov:skip</code> honoured</td></tr>
+  <tr><td>HTTP requests without timeout (script)</td><td><code>B113</code></td><td class="fix">RESOLVED</td><td>bandit PASSED; notebook equivalent also now fixed</td></tr>
+  <tr><td>try/except/pass</td><td><code>B110</code></td><td class="fix">RESOLVED</td><td>bandit PASSED</td></tr>
+  <tr><td>GitHub secret <em>name</em> in README</td><td><code>SECRET-KEYWORD</code></td><td class="fix">RESOLVED</td><td>pragma honoured; not reported</td></tr>
+  <tr><td>OTel entropy false positives &times;11</td><td><code>SECRET-*-HIGH-ENTROPY-STRING</code></td><td class="fix">SUPPRESSED</td><td>ASH counts exactly 11 as suppressed</td></tr>
+  <tr><td>MCP role ECR image-pull on <code>*</code></td><td><code>AwsSolutions-IAM5</code></td><td class="fix">RESOLVED</td><td>Split: token on <code>*</code> (AWS-mandated), image-pull on <code>repository/*</code></td></tr>
+  <tr><td>Agent Bedrock invoke account-wide</td><td><code>AwsSolutions-IAM5</code></td><td class="fix">RESOLVED</td><td>3 exact ARNs; verified on the deployed role</td></tr>
+  <tr><td>Cognito password policy unset</td><td><code>AwsSolutions-COG1</code></td><td class="fix">RESOLVED</td><td>Explicit 12-char policy, all four character classes; <strong>COG1 now reports Compliant</strong></td></tr>
+  <tr><td>Lambda not on latest runtime</td><td><code>AwsSolutions-L1</code></td><td class="fix">RESOLVED (user code)</td><td><code>PreTokenFn</code> is <code>python3.13</code>; the remaining L1 is CDK's provider Lambda</td></tr>
+  <tr><td>Internal error details returned to callers</td><td>TS008</td><td class="fix">RESOLVED</td><td><code>mask_error_details=True</code>, <code>include_traceback=False</code></td></tr>
+</table>
+
+<h2>Section 2 — Suppressed (reviewed false positives)</h2>
+<table>
+  <tr><th>Rule</th><th class="num">Count</th><th>Where</th><th>Why not a risk</th></tr>
+  <tr><td><code>SECRET-HEX-HIGH-ENTROPY-STRING</code></td><td class="num">10</td><td><code>fixtures/sample_traces.json</code></td><td>OTel <code>traceId</code>/<code>spanId</code> correlation identifiers</td></tr>
+  <tr><td><code>SECRET-BASE64-HIGH-ENTROPY-STRING</code></td><td class="num">1</td><td><code>fixtures/sample_traces.json</code></td><td>AgentCore runtime resource-name suffix</td></tr>
+  <tr><td><code>CKV_DOCKER_2</code></td><td class="num">2</td><td>both Dockerfiles</td><td>AgentCore performs its own liveness probing; slim base has no curl</td></tr>
+  <tr><td><code>B105</code></td><td class="num">1</td><td><code>agent/src/assistant_agent.py:47</code></td><td><code>_m2m_token_cache = {"token": None, …}</code> — bandit matches the key name and reports the literal <code>None</code>. Empty cache initialiser.</td></tr>
+</table>
+<p class="meta">
+  Also suppressed by <code>ignore_paths</code> rather than counted: base-image <code>sha256</code> digest pins in both
+  Dockerfiles, which a standalone detect-secrets run flags as high-entropy strings. Removing a supply-chain
+  pin to quiet a scanner would be a regression.
+</p>
+
+<h2>Section 3 — Accepted IaC findings</h2>
+<p class="meta">
+  From checkov 3.2.499 against the synthesized template (<strong>65 passed / 7 failed</strong>). ASH reported
+  cfn-nag MISSING and <code>cdk.out/</code> is now excluded from ASH, so these come from a supplementary run
+  retained in <code>raw/checkov-cfn.json</code>.
+</p>
+<table>
+  <tr><th>Rule</th><th>Check</th><th class="num">&times;</th><th>Decision</th></tr>
+  <tr><td><code>CKV_AWS_115</code></td><td>Lambda function-level concurrent execution limit</td><td class="num">2</td>
+      <td><span class="pill p-warn">ACCEPTED</span> A reserved-concurrency cap would bound cost and blast radius, but on a synchronous Cognito pre-token trigger it also caps sign-in throughput — under load, exceeding it fails logins. Not worth that trade for a demo; revisit with a measured limit for production.</td></tr>
+  <tr><td><code>CKV_AWS_116</code></td><td>Lambda dead-letter queue</td><td class="num">2</td>
+      <td><span class="pill p-warn">ACCEPTED</span> DLQs apply to asynchronous invocations. Both functions are synchronous (Cognito trigger, CDK custom resource), so a DLQ would never receive anything.</td></tr>
+  <tr><td><code>CKV_AWS_117</code></td><td>Lambda inside a VPC</td><td class="num">2</td>
+      <td><span class="pill p-warn">ACCEPTED</span> Neither function calls a VPC resource. Adding a VPC introduces ENI cold-start cost and NAT egress for no isolation gain.</td></tr>
+  <tr><td><code>CKV_AWS_149</code></td><td>Secret encrypted with a KMS CMK</td><td class="num">1</td>
+      <td><span class="pill p-warn">ACCEPTED for dev</span> Uses the AWS-managed key, so key policy and cross-account grants cannot be controlled independently. A CMK is the production norm and adds a billable key.</td></tr>
+</table>
+<div class="banner">
+  <strong>Correction to the earlier draft of this report.</strong> <code>CKV_AWS_115</code> was described as
+  X-Ray tracing. It is not — it is the function-level concurrency limit. X-Ray tracing
+  (<code>CKV_AWS_50</code>) does not appear in checkov's CloudFormation results at all. Tracing was enabled on
+  <code>PreTokenFn</code> on its own merits (it sits in the authorization path and was untraced, see TS018),
+  not to satisfy a checkov rule.
+</div>
+
+<h2>Section 4 — cdk-nag: 18 unsuppressed evaluations</h2>
+<p class="meta">
+  cdk-nag 2.38.2 run out-of-band; the repository deliberately does not wire the aspect into
+  <code>app.py</code>. 26 evaluations: 18 non-compliant, 8 compliant. CSV in <code>raw/cdk-nag-report.csv</code>.
+</p>
+<table>
+  <tr><th>Rule</th><th class="num">Count</th><th>Assessment</th></tr>
+  <tr><td><code>IAM5</code></td><td class="num">12</td>
+      <td>Path wildcards inside bounded ARNs (<code>log-group:/aws/bedrock-agentcore/runtimes/*</code>, <code>repository/*</code>, <code>log-stream:*</code>) or <code>Resource:*</code> where AWS mandates it (<code>ecr:GetAuthorizationToken</code>, X-Ray <code>Put*/Get*</code>, <code>logs:DescribeLogGroups</code>, <code>cloudwatch:PutMetricData</code> — the last namespace-constrained). Not over-permission; they need evidence-bearing suppressions, which is what the rule asks for.
+      <br><span class="meta"><strong>Note the trade-off:</strong> this rose from 11 to 12 in this round. Enabling X-Ray tracing on <code>PreTokenFn</code> caused CDK to attach an X-Ray write policy whose resources are <code>*</code> — a real, if minor, cost of that fix.</span></td></tr>
+  <tr><td><code>IAM4</code></td><td class="num">2</td><td><code>AWSLambdaBasicExecutionRole</code>; minimal and appropriate. One is CDK's provider role, not user-controllable.</td></tr>
+  <tr><td><code>L1</code></td><td class="num">1</td><td>Now the <strong>CDK-managed provider Lambda</strong> only — <code>PreTokenFn</code> is on <code>python3.13</code> and reports compliant.</td></tr>
+  <tr><td><code>COG2</code></td><td class="num">1 <span class="pill p-muted">Warning</span></td><td>MFA not required. Enabling it breaks the notebooks' <code>ADMIN_NO_SRP_AUTH</code> flow.</td></tr>
+  <tr><td><code>COG8</code></td><td class="num">1</td><td>No Cognito Plus plan. Cost decision.</td></tr>
+  <tr><td><code>SMG4</code></td><td class="num">1</td><td>No rotation. Cognito client secrets have no native rotation template; custom rotation risks the agent&rarr;MCP auth path.</td></tr>
+</table>
+<p>
+  <strong><code>COG1</code> moved to compliant</strong> this round. The count stays at 18 because
+  <em>nothing is suppressed</em> — a deliberate decision by the repository owner — so every matched rule,
+  including reviewed-and-accepted ones, reports non-compliant on every run. This is a bookkeeping gap, not
+  18 distinct weaknesses, and it means cdk-nag cannot serve as a CI gate as things stand.
+</p>
+
+<h3>Every wildcard, enumerated</h3>
+<p class="meta">
+  Read from the <em>deployed</em> policies via <code>aws iam get-role-policy</code>, not from source, so this is
+  what is actually in effect. This is the full set of wildcard-bearing statements behind the 12
+  <code>IAM5</code> findings — the reader can judge each rather than trusting the summary.
+</p>
+<table>
+  <tr><th>Role</th><th>Sid</th><th>Actions</th><th>Resource</th><th>Why the wildcard</th></tr>
+  <tr><td rowspan="6">MCPServerRole</td><td><em>none</em></td><td><code>logs:DescribeLogStreams</code>, <code>CreateLogGroup</code></td>
+      <td><code>log-group:/aws/bedrock-agentcore/runtimes/*</code></td>
+      <td>Path wildcard inside a bounded prefix. Runtime log-group names are generated per runtime ID.</td></tr>
+  <tr><td><em>none</em></td><td><code>logs:DescribeLogGroups</code></td><td><code>log-group:*</code></td>
+      <td>AWS API constraint — <code>DescribeLogGroups</code> does not support resource-level permissions.</td></tr>
+  <tr><td><em>none</em></td><td><code>logs:CreateLogStream</code>, <code>PutLogEvents</code></td>
+      <td><code>…/runtimes/*:log-stream:*</code></td><td>Path wildcard; stream names are per-invocation.</td></tr>
+  <tr><td><code>ECRTokenAccess</code></td><td><code>ecr:GetAuthorizationToken</code></td><td><code>*</code></td>
+      <td>AWS API constraint — no resource-level permissions. Split out from image-pull precisely so this is the only action holding <code>*</code>.</td></tr>
+  <tr><td><code>ECRImageAccess</code></td><td><code>ecr:BatchGetImage</code>, <code>GetDownloadUrlForLayer</code></td>
+      <td><code>repository/*</code></td><td>Path wildcard within the account's registry. <strong>Was <code>*</code> in v1.</strong></td></tr>
+  <tr><td><em>none</em></td><td>X-Ray <code>PutTraceSegments</code>, <code>PutTelemetryRecords</code>, <code>GetSamplingRules</code>, <code>GetSamplingTargets</code></td>
+      <td><code>*</code></td><td>AWS API constraint — X-Ray write/sampling actions take no resource.</td></tr>
+
+  <tr><td rowspan="6">AgentRole</td><td><code>ECRImageAccess</code></td><td><code>ecr:BatchGetImage</code>, <code>GetDownloadUrlForLayer</code></td>
+      <td><code>repository/*</code></td><td>Path wildcard.</td></tr>
+  <tr><td><code>ECRTokenAccess</code></td><td><code>ecr:GetAuthorizationToken</code></td><td><code>*</code></td><td>AWS API constraint.</td></tr>
+  <tr><td><em>none</em> &times;3</td><td>the same three <code>logs:</code> statements as above</td>
+      <td><code>log-group:*</code> / <code>…runtimes/*</code></td><td>As above.</td></tr>
+  <tr><td><em>none</em></td><td>X-Ray <code>Put*</code>/<code>Get*</code></td><td><code>*</code></td><td>AWS API constraint.</td></tr>
+  <tr><td><em>none</em></td><td><code>cloudwatch:PutMetricData</code></td><td><code>*</code> <em>with condition</em></td>
+      <td>Cannot be resource-scoped, but constrained by <code>cloudwatch:namespace = bedrock-agentcore</code>, so it is effectively bounded.</td></tr>
+  <tr><td><code>A2AInvocation</code></td><td><code>bedrock-agentcore:InvokeAgentRuntime</code></td>
+      <td><code>runtime/mcp_server_dev-…</code> + <code>/runtime-endpoint/*</code></td>
+      <td>Named target runtime; only the endpoint qualifier is wildcarded. <strong>Was account-wide <code>agent-runtime/*</code> in v1.</strong></td></tr>
+</table>
+<p>
+  Not shown because they now carry no wildcard at all: <code>BedrockModelInvocation</code> (three exact ARNs —
+  the inference profile plus the model in each of its two routing regions) and the Secrets Manager read
+  (scoped to the secret ARN by <code>grant_read</code>). Both were wildcarded in v1.
+</p>
+<p>
+  <strong>Assessment:</strong> of the wildcards remaining, six are AWS API constraints where no narrower policy
+  is expressible, one is condition-bounded, and the rest are path wildcards inside account- and
+  service-bounded prefixes. None grants access outside this stack's own resources.
+</p>
+
+<h2>Section 5 — Remaining coverage gaps</h2>
+<ul>
+  <li><strong>grype / syft / opengrep MISSING inside ASH.</strong> Container-image and SBOM scanning still did
+      not run. The Python dependency gap is now closed via pip-audit, but OS-level packages in the base image
+      are unscanned.</li>
+  <li><strong>cdk-nag and cfn-nag MISSING inside ASH</strong> — as in v1. IaC coverage depends on out-of-band
+      runs, so it is not reproducible from <code>ash</code> alone.</li>
+  <li><strong>Pinning needs a recurring audit — now wired in.</strong> This round proved pins go stale
+      dangerously: exact pins are correct for reproducibility but guarantee nothing about vulnerabilities.
+      <code>pip-audit</code> has since been added to the <code>security-scan</code> job, installing each package
+      so transitive dependencies are covered (<code>pip</code> itself was one of the three vulnerable packages
+      and appears in no dependency list). It still only <em>reports</em> — see recommendation 1.</li>
+  <li><strong>Scanner configuration is not versioned.</strong> <code>.ash/.ash.yaml</code> was untracked and
+      gitignored, so the exclusions and the recorded reasons for each accepted false positive do not travel
+      with the code. Consequences: CI and any fresh clone report 69 findings rather than 0; the rationale for
+      dismissing them is unrecoverable from the repository; and the next reviewer cannot tell noise from risk
+      without redoing the analysis. The bulk of it (<code>cdk.out/**</code>, notebook run output) is pure
+      artifact exclusion that carries no risk-acceptance implication and could be re-added on that basis
+      alone.</li>
+  <li><strong>Git history is out of scope</strong> for a working-tree scan. The historical access key ID and
+      account ID remain reachable via GitHub <code>refs/pull/1,2</code> and on the Amazon remote's
+      <code>main</code>/<code>dev</code>.</li>
+</ul>
+
+<h2>Recommended next actions</h2>
+<ol>
+  <li><span class="fix">DONE</span> <strong>Dependency audit scheduled.</strong> <code>pip-audit==2.10.1</code>
+      is now a step in the <code>security-scan</code> job, rehearsed in a Linux container matching
+      <code>ubuntu-latest</code> (both packages clean, step exits 0). It found 13 advisories that no other
+      scanner in this stack would have caught.</li>
+  <li><strong>Decide where scan configuration lives.</strong> With <code>.ash/.ash.yaml</code> untracked, the
+      <code>security-scan</code> job will report 69 findings on every PR — which trains reviewers to ignore it,
+      the exact failure mode the job exists to prevent. Either re-add the artifact exclusions to the repo (they
+      excuse no risk) or move them into whatever configuration CI does read.</li>
+  <li><strong>Make the pipeline gate real</strong> — the scan job still carries <code>continue-on-error: true</code>.
+      With ASH now exiting 0, removing that line is finally safe.</li>
+  <li><strong>Decide the cdk-nag position:</strong> record suppressions with evidence and gate on it, or drop it.
+      18 permanently non-compliant evaluations means the signal is ignored either way.</li>
+  <li><strong>Before production:</strong> require MFA (COG2), consider Cognito Plus (COG8), use a CMK for the M2M
+      secret (CKV_AWS_149), and set a measured reserved-concurrency limit on <code>PreTokenFn</code> (CKV_AWS_115).</li>
+</ol>
+
+<h2>Appendix A — Reproducing this report</h2>
+<p>
+  Every figure above can be re-derived with the commands below. Versions are stated because two findings in
+  this report (<code>COG1</code>, <code>L1</code>) changed status between rule-pack versions with no code change,
+  so tool version is part of the result.
+</p>
+
+<h3>Tool inventory</h3>
+<table>
+  <tr><th>Tool</th><th>Version</th><th>How obtained</th><th>Covers</th></tr>
+  <tr><td>ASH</td><td>3.5.9</td><td><code>pip install git+https://github.com/awslabs/automated-security-helper.git</code></td><td>Orchestrates the scanners below; runs 1–4</td></tr>
+  <tr><td>bandit</td><td>1.8.6</td><td>via ASH</td><td>Python SAST, incl. notebooks (converted to <code>.py</code>)</td></tr>
+  <tr><td>detect-secrets</td><td>1.5.45</td><td>via ASH</td><td>Secrets and high-entropy strings</td></tr>
+  <tr><td>checkov</td><td>3.2.499</td><td>via ASH + standalone</td><td>Dockerfiles (via ASH); CloudFormation (standalone)</td></tr>
+  <tr><td>semgrep</td><td>1.173.0</td><td>via ASH</td><td>GitHub Actions, secrets, Python rule packs</td></tr>
+  <tr><td>cdk-nag</td><td>2.38.2</td><td>out-of-band (MISSING in ASH)</td><td>AwsSolutions IaC rule pack</td></tr>
+  <tr><td>pip-audit</td><td>2.10.1</td><td>out-of-band, run inside built images</td><td>Python dependency advisories</td></tr>
+</table>
+
+<h3>Commands</h3>
+<pre># 1. ASH (runs 1–4). Run 1 was before .ash/.ash.yaml ignore_paths existed.
+ash --source-dir . --output-dir &lt;out&gt;
+#    Exit 0 = no actionable findings; exit 2 = actionable findings present.
+
+# 2. Separate source findings from build/run artifacts (how the 59-vs-4 split was derived):
+#    intersect SARIF result URIs with `git ls-files`.
+python - &lt;&lt;'EOF'
+import json, subprocess
+tracked = set(subprocess.run(["git","ls-files"],capture_output=True,text=True).stdout.split())
+sarif = json.load(open("&lt;out&gt;/reports/ash.sarif"))
+for run in sarif["runs"]:
+    for r in run.get("results", []):
+        if r.get("suppressions"): continue
+        uri = r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        print("SOURCE" if uri in tracked else "artifact", r["ruleId"], uri)
+EOF
+
+# 3. CloudFormation policy checks (ASH's cfn-nag was MISSING; cdk.out is excluded from ASH)
+cdk synth --json &gt; template.json
+checkov -f template.json --framework cloudformation --compact --quiet
+
+# 4. cdk-nag (not wired into app.py by design; run via a temporary entry point)
+#    Aspects.of(app).add(cdk_nag.AwsSolutionsChecks(verbose=True)); app.synth()
+#    Output: AwsSolutions--&lt;stack&gt;-NagReport.csv
+
+# 5. Dependency advisories — run INSIDE the built image so transitive deps and the
+#    image's own pip are included. This is what found the 13 advisories.
+docker run --rm -u 0 &lt;image&gt; sh -c "pip install -q pip-audit &amp;&amp; pip-audit --progress-spinner off"
+
+# 6. Confirm the IAM wildcard inventory against what is deployed, not source
+aws iam get-role-policy --role-name &lt;role&gt; --policy-name &lt;policy&gt;</pre>
+
+<h3>Scan scope — <code>.ash/.ash.yaml</code> <span class="pill p-warn">not versioned</span></h3>
+<p>
+  This configuration is <strong>no longer tracked in the repository</strong>; it is retained on the
+  maintainer's machine only. Reproducing the exit-0 result requires recreating it. The contents are recorded
+  here so that is possible:
+</p>
+<table>
+  <tr><th>Path</th><th>Why</th></tr>
+  <tr><td><code>cdk.out/**</code></td><td>CDK synth output; contains stale Dockerfile copies predating the non-root fix, so it re-reports findings that no longer exist in source</td></tr>
+  <tr><td><code>notebooks/eval_output*.json</code></td><td>OTel traces written at run time by notebook 02; gitignored</td></tr>
+  <tr><td><code>cdk-nag-report.csv</code></td><td>Generated report artifact; flagged strings are CDK construct paths</td></tr>
+  <tr><td><code>.venv/**</code></td><td>Local virtualenv; third-party code</td></tr>
+</table>
+<p class="meta">
+  <strong>Gotcha:</strong> <code>path: "cdk.out"</code> does not match a directory — it must be
+  <code>cdk.out/**</code>. The first attempt left 21 findings in place and looked like a config that had been
+  applied.
+</p>
+<p>Suppressed rules (in files that <em>are</em> scanned): 4 entries covering the fixture's OTel identifiers,
+  both Dockerfile digest pins, and the <code>B105</code> cache initialiser — enumerated in Section 2.</p>
+
+<h3>Functional verification at the same tree</h3>
+<p>
+  Security changes in this round touched authentication, authorization and IAM, so each deploy was followed by
+  both walkthrough notebooks:
+</p>
+<ul>
+  <li><strong>Notebook 01</strong> (user tokens, role path): 6/6 RBAC assertions, 0 error outputs. Exercises the
+      pre-token Lambda — the component whose runtime was upgraded to <code>python3.13</code> — so a regression
+      there would surface as failed logins.</li>
+  <li><strong>Notebook 02</strong> (M2M token, scope path): all four evaluators 1.0, quality gate passed,
+      0 error outputs.</li>
+  <li><strong>Targeted checks:</strong> a token holding only <code>mcp/invoke</code> cannot reach the finance tool
+      while one holding <code>mcp/finance</code> can (TS001); a tampered signature and an unsigned
+      <code>alg:none</code> forgery are both rejected (TS002); deployed Lambda reports
+      <code>python3.13</code>/<code>Active</code> tracing; deployed pool reports the 12-character password policy.</li>
+</ul>
+
+<p class="meta" style="margin-top:2rem; border-top:1px solid var(--line); padding-top:.8rem">
+  Generated for review; this document modifies no scanned code. Raw output retained:
+  <code>ash-run/</code> (run 1), <code>ash-run-clean/</code> (run 2), <code>ash-run-v3/</code> (run 3),
+  <code>ash-run-v4/</code> (run 4, latest — exit 0); plus <code>raw/checkov-cfn.json</code>,
+  <code>raw/cdk-nag-report.csv</code> and
+  <code>raw/template.json</code>. Every figure here is reproducible from those files.
+  Functional verification at the same tree: notebook 01 RBAC 6/6, notebook 02 all four evaluators 1.0.
+</p>
+
+</body>
+</html>
