@@ -150,9 +150,84 @@ python3 agentcore_eval.py
 
 ## CI/CD Setup
 
-1. Create an IAM role for GitHub OIDC with permissions to deploy CDK stacks, manage AgentCore runtimes, and invoke Cognito.
-2. Add the role ARN as a GitHub secret: `AWS_ROLE_ARN`. <!-- pragma: allowlist secret --> <!-- reason: GitHub Actions secret NAME, not a credential value -->
-3. Push a PR to `main` — the workflow deploys, evaluates, posts results to the PR, and tears down automatically.
+The workflow runs on every pull request to `main`: it deploys the stack, invokes the agent, scores the
+responses and fails the PR if any metric falls below `EVAL_THRESHOLD`. That means **a pull request causes
+AWS credentials to be issued**, so the role it assumes needs scoping carefully — a role trusted by
+`repo:OWNER/REPO:*` with `iam:*` permissions can be assumed by any PR in that repo and used to modify IAM.
+
+The three steps below keep the PR-gating behaviour intact while bounding what a PR can do.
+
+### 1. Trust the OIDC provider, scoped to this repo *and* the environment
+
+If the account has no GitHub OIDC provider yet, create one for
+`token.actions.githubusercontent.com` with audience `sts.amazonaws.com` (only one per account is allowed).
+
+Then create a role whose trust policy names **both the repository and the environment**:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com" },
+    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Condition": {
+      "StringEquals": {
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+        "token.actions.githubusercontent.com:sub": "repo:<OWNER>/<REPO>:environment:dev"
+      }
+    }
+  }]
+}
+```
+
+Two details matter:
+
+- **`environment:dev`, not `:*`.** GitHub only issues a token with this subject when the job declares
+  `environment: dev`, which the `evaluate` job does. A trailing `:*` would let any branch, tag or PR in the
+  repo assume the role.
+- **`StringEquals`, not `StringLike`.** With `StringLike` plus a wildcard, a subject you did not intend can
+  match.
+
+### 2. Require a reviewer on the `dev` environment
+
+In **Settings → Environments → `dev`**, add **Required reviewers**.
+
+This is what makes PR-triggered deployment safe: credentials are not issued until a maintainer approves the
+run, so a pull request containing hostile changes cannot reach AWS on its own. The quality gate still works
+exactly as intended — it just waits for one approval on untrusted contributions.
+
+### 3. Grant only what the workflow needs
+
+The workflow deploys a CDK stack, so it needs CloudFormation, ECR, Cognito, Secrets Manager, AgentCore,
+CloudWatch and the CDK bootstrap SSM parameter, plus `bedrock:InvokeModel` for evaluation. It also needs to
+create the two execution roles in `infrastructure/roles.py` — but that requires only role and policy
+operations, **not `iam:*`**:
+
+```
+iam:CreateRole, iam:DeleteRole, iam:GetRole, iam:PassRole, iam:TagRole,
+iam:AttachRolePolicy, iam:DetachRolePolicy, iam:PutRolePolicy, iam:DeleteRolePolicy,
+iam:GetRolePolicy, iam:ListRolePolicies, iam:ListAttachedRolePolicies
+```
+
+Scope those to the stack's own role paths where practical. `iam:*` on `Resource: "*"` lets anything that
+assumes the role create or modify arbitrary roles and policies, which is account takeover rather than a
+deployment permission.
+
+### 4. Add the role ARN as a secret
+
+Add the role ARN as the repository secret `AWS_ROLE_ARN`. <!-- pragma: allowlist secret --> <!-- reason: GitHub Actions secret NAME, not a credential value -->
+If you define it as an *environment* secret instead, it must be on the `dev` environment, since that is what
+the `evaluate` job targets.
+
+The workflow checks this secret before configuring credentials and fails with an explicit message if it is
+absent — otherwise the credentials action retries twelve times and reports only
+`Could not load credentials from any providers`, which does not mention the secret.
+
+> **Fork pull requests cannot pass.** GitHub withholds secrets from workflows triggered by PRs from forks, so
+> the deploy-and-evaluate job cannot authenticate for external contributions. The `security-scan` job needs no
+> credentials and still runs. If you require the evaluation check for merge, expect to run it on a branch in
+> this repository rather than on a fork PR.
 
 ## Teardown
 
