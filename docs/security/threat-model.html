@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AWS Threat Model (v2) — AgentCore Evaluation Pipeline with MCP RBAC</title>
+<style>
+  :root { --ok:#1b7f37; --warn:#b35c00; --bad:#b3261e; --muted:#5f6368; --line:#e0e0e0; }
+  body { font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         max-width:1100px; margin:2rem auto; padding:0 1.5rem; color:#202124; line-height:1.55; }
+  h1 { border-bottom:3px solid #232f3e; padding-bottom:.4rem; margin-bottom:.2rem; }
+  h2 { margin-top:2.2rem; border-bottom:1px solid var(--line); padding-bottom:.3rem; }
+  h3 { margin-top:1.5rem; }
+  code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.88em; }
+  pre { background:#f6f8fa; padding:.7rem 1rem; border-radius:6px; overflow-x:auto; border:1px solid var(--line); }
+  table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.92em; }
+  th,td { border:1px solid var(--line); padding:.5rem .6rem; text-align:left; vertical-align:top; }
+  th { background:#f1f3f4; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:10px; font-size:.76em; font-weight:600; color:#fff; white-space:nowrap; }
+  .p-ok{background:var(--ok);} .p-warn{background:var(--warn);} .p-bad{background:var(--bad);} .p-muted{background:var(--muted);}
+  .meta { color:var(--muted); font-size:.9em; }
+  .banner { border-left:4px solid var(--warn); background:#fff8e1; padding:.8rem 1rem; margin:1.2rem 0; border-radius:4px; }
+  .banner.ok { border-left-color:var(--ok); background:#e8f5e9; }
+  .banner.bad { border-left-color:var(--bad); background:#fdecea; }
+  .kpi { display:flex; gap:1rem; flex-wrap:wrap; margin:1rem 0; }
+  .kpi div { border:1px solid var(--line); border-radius:6px; padding:.7rem 1rem; min-width:110px; text-align:center; }
+  .kpi b { display:block; font-size:1.7rem; }
+</style>
+</head>
+<body>
+
+<h1>AWS Threat Model (v2)</h1>
+<h2 style="border:none;margin-top:.2rem">AgentCore Evaluation Pipeline with MCP Role-Based Access Control</h2>
+<p class="meta">
+  <strong>System under review:</strong> SampleAgentcoreEvalDemo &nbsp;|&nbsp;
+  <strong>Commit:</strong> <code>2458c83</code> / <code>aa6fb7d</code> (tree <code>ea50b8ad</code>) &nbsp;|&nbsp;
+  <strong>Revised:</strong> 2026-08-19 &nbsp;|&nbsp;
+  <strong>Baseline:</strong> v1 threat model (18 threats, 105 mitigations)
+</p>
+
+<div class="banner">
+  <strong>What this document is.</strong> A threat model is authored analysis, not tool output. The v1 catalog
+  (TS001–TS019, no TS006) is retained unchanged; what is revised here is the <em>status</em> of each threat and
+  the evidence for it. Every "Mitigated" claim below was verified against the code at the commit above, and
+  where relevant against the deployed stack — the verification method is stated per threat so you can
+  re-check rather than take it on trust. Claims that could <em>not</em> be verified are marked as such.
+</div>
+
+<h2>Posture summary</h2>
+
+<div class="kpi">
+  <div><b>0</b><span class="pill p-ok">Critical</span></div>
+  <div><b>1</b><span class="pill p-bad">High open</span></div>
+  <div><b>3</b><span class="pill p-ok">High mitigated</span></div>
+  <div><b>3</b><span class="pill p-ok">Medium mitigated</span></div>
+  <div><b>2</b><span class="pill p-warn">Medium partial</span></div>
+</div>
+
+<p>
+  Ten of the eighteen threats are now mitigated, two are partially mitigated, and six remain open — five of
+  which are Low severity. <strong>The single most important residual risk is TS003</strong> (a same-repo pull
+  request executing under the CI OIDC role), because its mitigation lives outside this repository and
+  therefore cannot be closed by a code change.
+</p>
+
+<table>
+  <tr><th>Threat</th><th>Sev</th><th>Status</th><th>Evidence / verification</th></tr>
+
+  <tr>
+    <td><strong>TS001</strong> M2M full-tool RBAC bypass via scopes-without-roles path</td>
+    <td>High</td><td><span class="pill p-ok">MITIGATED</span></td>
+    <td>The blanket bypass in <code>_should_trim()</code> is removed. A gated tool now requires a matching
+        role <em>or</em> a matching scope; tools declare <code>auth_meta(roles=[…], scopes=["mcp/finance"|"mcp/hr"])</code>
+        and the Cognito resource server defines per-domain scopes.
+        <em>Verified live:</em> a token with only <code>mcp/invoke</code> could not reach the finance tool, while a
+        token with <code>mcp/finance mcp/hr</code> could. Deny-by-default now applies to newly added gated tools.
+        <br><span class="meta">Residual: a leaked M2M secret still reaches the domains that client is granted — bounded, not eliminated.</span></td>
+  </tr>
+
+  <tr>
+    <td><strong>TS002</strong> JWT forgery accepted by MCP due to skipped signature verification</td>
+    <td>Medium</td><td><span class="pill p-ok">MITIGATED</span></td>
+    <td><code>src/auth/utils.py</code> verifies the signature via <code>PyJWKClient</code> against the pool's JWKS,
+        checks the issuer and expiry, and fails closed if <code>USER_POOL_ID</code> is absent or JWKS is
+        unreachable — it never falls back to an unverified decode.
+        <em>Verified against a real token:</em> valid accepted; tampered signature rejected
+        (<code>InvalidSignatureError</code>); unsigned <code>alg:none</code> forgery rejected
+        (<code>PyJWKClientError</code>).</td>
+  </tr>
+
+  <tr>
+    <td><strong>TS003</strong> Malicious same-repo PR tampers with agent/MCP code under CI OIDC role</td>
+    <td>High</td><td><span class="pill p-bad">OPEN (partial)</span></td>
+    <td>In-repo scaffolding added: the <code>evaluate</code> job now names an <code>environment: dev</code>, and all
+        10 actions are SHA-pinned so a repointed tag cannot inject code.
+        <strong>Now applied in AWS:</strong> the role's trust policy is scoped to
+        <code>sub = repo:&lt;owner&gt;/&lt;repo&gt;:environment:dev</code> using <code>StringEquals</code>, so STS
+        issues credentials only to a job declaring that environment — it also previously trusted a different
+        repository entirely, so it could not have been assumed from here at all. And <code>iam:*</code> on
+        <code>Resource:*</code> is replaced by role operations scoped to the stack's own role names; verified
+        with <code>iam simulate-principal-policy</code>, with <code>iam:CreateUser</code>,
+        <code>iam:CreateAccessKey</code>, <code>iam:PutUserPolicy</code> and cross-role writes all returning
+        <code>implicitDeny</code>. A full CI deploy then succeeded under the narrowed policy.
+        <br><strong>Still outstanding — the decisive control:</strong> required reviewers on the
+        <code>dev</code> environment. The scoping is not yet a gate, because the workflow itself declares
+        <code>environment: dev</code>, so any PR that triggers it yields a matching subject. The CI run
+        proceeded without pausing, confirming no reviewer requirement is set. Blast radius is bounded;
+        access is not yet gated. This is a GitHub setting the repository cannot enforce.
+        <span class="meta">Deploy-on-PR is deliberately unchanged: gating the merge on evaluation results is
+        what this sample exists to demonstrate.</span></td>
+  </tr>
+
+  <tr>
+    <td><strong>TS004</strong> Prompt injection coerces agent into unauthorized tool invocation or header exfiltration</td>
+    <td>Low</td><td><span class="pill p-warn">OPEN (accepted)</span></td>
+    <td>A system-prompt mitigation was implemented, then <strong>deliberately reverted</strong> after evaluation:
+        it could not be shown to help, and prompt-level defences are weak. No Bedrock Guardrail is configured
+        (<code>grep</code> for <code>guardrail</code> returns 0).
+        Structural mitigations do exist and limit impact: tool access is enforced server-side by
+        <code>AuthMiddleware</code>, and the agent never places the bearer token in model context.
+        <br><span class="meta">Proper fix: attach a Bedrock Guardrail. Deferred by decision, not oversight.</span></td>
+  </tr>
+
+  <tr>
+    <td><strong>TS005</strong> Role escalation between FinanceUser and HRUser via AdminUpdateUserAttributes</td>
+    <td>Low</td><td><span class="pill p-ok">MITIGATED</span></td>
+    <td><code>custom:roles</code> is now declared immutable
+        (<code>cognito.StringAttribute(mutable=False)</code>), so the claim the MCP server authorizes against
+        cannot be rewritten after user creation. <em>Verified</em> in the deployed pool schema
+        (<code>Mutable: false</code> on <code>roles</code>) with RBAC still passing 6/6.
+        Defence in depth: the pre-token Lambda also validates roles against an allowlist.</td>
+  </tr>
+
+  <tr>
+    <td><strong>TS007</strong> Lateral movement via over-broad Bedrock and AgentCore IAM permissions</td>
+    <td>Medium</td><td><span class="pill p-ok">MITIGATED</span></td>
+    <td>Three separate reductions, each confirmed on the deployed roles via <code>iam get-role-policy</code>:
+        Bedrock narrowed from <code>foundation-model/*</code> plus account-wide <code>bedrock:*</code> to three exact
+        ARNs (inference profile + model in its two routing regions, confirmed via
+        <code>get-inference-profile</code>); ECR image-pull scoped to <code>repository/*</code> with only
+        <code>GetAuthorizationToken</code> left on <code>*</code> where AWS requires it; and
+        <code>InvokeAgentRuntime</code> scoped from account-wide <code>agent-runtime/*</code> to the specific MCP
+        runtime ARN. <code>MODEL_ID</code> is a single constant shared by policy and runtime env so they cannot drift.</td>
+  </tr>
+
+  <tr>
+    <td><strong>TS008</strong> Sensitive claims and token fragments leaked via DEBUG logs</td>
+    <td>Low</td><td><span class="pill p-ok">MITIGATED</span></td>
+    <td><code>LOG_LEVEL</code> is <code>INFO</code> on both runtimes (<code>grep</code> for
+        <code>LOG_LEVEL": "DEBUG"</code> returns 0). Authorization decisions are still logged for audit, but
+        without decoded claim dumps.
+        The remaining sub-case is now closed too: <code>mask_error_details=True</code> and
+        <code>include_traceback=False</code>, so internal exception text and stack traces are no longer
+        returned to callers. Errors are still logged server-side in full.</td>
+  </tr>
+
+  <tr>
+    <td><strong>TS009</strong> AWS account ID disclosure via Cognito domain prefix and public OAuth endpoint</td>
+    <td>Low</td><td><span class="pill p-ok">MITIGATED</span></td>
+    <td>Domain prefix is now <code>agentcore-&lt;stage&gt;-&lt;sha256(account)[:12]&gt;</code> — deterministic, unique
+        per account, non-identifying. <em>Verified deployed:</em>
+        <code>agentcore-dev-fd39890e9af3</code>.
+        <br><span class="meta">Residual: the historical account ID remains in git history — see the note below the table.</span></td>
+  </tr>
+
+  <tr>
+    <td><strong>TS010</strong> Denial-of-wallet via unthrottled Bedrock and AgentCore invocations</td>
+    <td>Medium</td><td><span class="pill p-warn">PARTIAL — detection only</span></td>
+    <td>Two CloudWatch alarms added on real metrics (<code>AWS/Bedrock</code> <code>Invocations</code> &gt; 200 and
+        <code>InputTokenCount</code> &gt; 500k per 5 min, dimensioned on the model), verified present and in
+        <code>OK</code> state after deploy.
+        <strong>This detects, it does not prevent.</strong> Both runtimes remain <code>network_mode=PUBLIC</code>
+        with no rate limiting, and no notification target is wired to the alarms. Prevention requires a
+        fronting layer (API Gateway usage plans / WAF rate rules) plus Bedrock quotas — a topology change.</td>
+  </tr>
+
+  <tr>
+    <td><strong>TS011</strong> Destructive removal policies on stateful/identity resources</td>
+    <td>Medium</td><td><span class="pill p-ok">MITIGATED (non-dev)</span></td>
+    <td><code>_removal_policy(stage)</code> returns <code>RETAIN</code> for every stage except <code>dev</code>.
+        <code>dev</code> deliberately keeps <code>DESTROY</code>: the notebooks deploy and tear down repeatedly and
+        retained pools/secrets would collide with the next deploy. <em>Verified:</em> synthesized template has 3
+        <code>DeletionPolicy: Delete</code> and 0 <code>Retain</code> at <code>dev</code>, as intended.</td>
+  </tr>
+
+  <tr>
+    <td><strong>TS012 / TS013</strong> Supply chain via mutable dependency references</td>
+    <td>Medium</td><td><span class="pill p-ok">MITIGATED</span></td>
+    <td>All 10 workflow actions pinned to 40-character commit SHAs (semgrep <code>p/github-actions</code> returns
+        0 findings); both container base images pinned by digest
+        (<code>python@sha256:2c941e86…</code>); every container dependency pinned to an exact version. Both images
+        were rebuilt and functionally verified after pinning.
+        <br><strong>The caveat in v2 proved correct and has been acted on.</strong> A <code>pip-audit</code> run
+        inside both built images found <strong>13 distinct advisories frozen in place by the pinning</strong>:
+        <code>PyJWT 2.11.0</code> (6 advisories &mdash; the library performing the TS002 signature
+        verification, so a vulnerable version undermined that control), <code>bedrock-agentcore 1.4.1</code>
+        (2), and <code>pip 25.0.1</code> in the base image. Now <code>PyJWT 2.13.0</code>,
+        <code>bedrock-agentcore 1.18.1</code>, pip upgraded at build; both images report
+        <em>no known vulnerabilities</em>. Verified functionally: both notebooks pass on the upgraded images.
+        <br><span class="meta">Residual: OS-level packages in the base image remain unscanned (grype/syft
+        unavailable), and pins go stale. That last point is now addressed in CI: <code>pip-audit</code> runs
+        as a <code>security-scan</code> step on every PR, so a future advisory in a pinned version surfaces
+        rather than sitting frozen in the image.</span></td>
+  </tr>
+
+  <tr>
+    <td><strong>TS014</strong> Secrets in CI output &amp; telemetry</td>
+    <td>Medium</td><td><span class="pill p-ok">MITIGATED</span></td>
+    <td>The client secret no longer transits CI step outputs. The step that wrote it to
+        <code>$GITHUB_OUTPUT</code> is removed; <code>scripts/agentcore_eval.py</code> resolves credentials from
+        Secrets Manager via <code>M2M_SECRET_ID</code>, and the warmup step reads them with boto3 instead of
+        interpolating a secret into a command line (where it would appear in the process list).
+        <em>Verified:</em> the script's Secrets Manager path acquires a valid token with no secret present in
+        the environment.
+        <br>Strengthened further: the warmup step now uses <code>urllib</code> in-process rather than invoking
+        <code>curl</code>, so the client secret no longer appears in the process argument list either — the
+        earlier change had only kept it out of step outputs. Confirmed in CI, where the warmup reached the MCP
+        server on its first attempt.</td>
+  </tr>
+
+  <tr>
+    <td><strong>TS015</strong> Fail-open / insecure defaults (privileged path is the default)</td>
+    <td>Medium</td><td><span class="pill p-ok">MITIGATED</span></td>
+    <td>Both fail-open defaults are gone: the M2M authorization bypass (TS001) and the unverified JWT decode
+        (TS002). Token verification now fails closed on any error — missing pool ID, unreachable JWKS, bad
+        signature — rather than proceeding with unverified claims.</td>
+  </tr>
+
+  <tr>
+    <td><strong>TS016</strong> Authorization bypass built in as a feature</td>
+    <td>High</td><td><span class="pill p-ok">MITIGATED</span></td>
+    <td>Resolved with TS001. There is no longer a code path that grants all tools on the basis of holding
+        any scope; scope grants are explicit and per-domain, declared in the CDK stack.</td>
+  </tr>
+
+  <tr>
+    <td><strong>TS017</strong> No security gate in the pipeline</td>
+    <td>Medium</td><td><span class="pill p-warn">PARTIAL — reports, does not gate</span></td>
+    <td>A <code>security-scan</code> job was added running bandit, checkov, detect-secrets and
+        <code>pip-audit</code> at pinned versions &mdash; the last covering dependency vulnerabilities, which is
+        how the 13 advisories under TS012/TS013 were found.
+        It carries <code>continue-on-error: true</code>, so <strong>a finding will not block a PR</strong> — chosen
+        deliberately because the current findings are untriaged and a permanently red build is worse than
+        none. Removing that one line turns it into a real gate.
+        <span class="meta">Note the ASH v2 scan found a 15&times; noise ratio from unexcluded build artifacts.
+        The exclusions that fixed it (<code>.ash/.ash.yaml</code>) have since been untracked from the
+        repository, so CI and any fresh clone will again see ~69 findings instead of 0 — measured, same code.
+        Restoring at least the artifact exclusions is a precondition for this job being worth gating on.</span></td>
+  </tr>
+
+  <tr>
+    <td><strong>TS018</strong> Missing detection &amp; response</td>
+    <td>Medium</td><td><span class="pill p-warn">PARTIAL</span></td>
+    <td>Two Bedrock spend alarms exist (see TS010) and MCP now emits structured authorization audit logs
+        (<code>Tool execution authorized</code> / <code>Access denied to tool</code> with role and scope context) —
+        these were used as primary evidence during verification, so they are demonstrably useful.
+        X-Ray tracing is now enabled on <code>PreTokenFn</code>, the function that injects the
+        <code>custom:roles</code> claim &mdash; previously the authorization path's only untraced component.
+        <strong>Still absent:</strong> any alarm on authorization failures or token rejections, no notification
+        target on the existing alarms, and no CloudTrail or GuardDuty reference. The latter two are
+        account/org-level controls, deliberately not enabled from this stack since the target account hosts
+        unrelated workloads.</td>
+  </tr>
+
+  <tr>
+    <td><strong>TS019</strong> Trusting unverified input (no aud/iss/exp/token_use checks)</td>
+    <td>High</td><td><span class="pill p-ok">MITIGATED</span></td>
+    <td>Resolved with TS002. Issuer and expiry are now verified. Audience verification remains disabled
+        by design — Cognito access tokens carry no <code>aud</code> claim; the platform authorizer restricts
+        <code>allowed_clients</code>, and <code>client_id</code> is available in claims should stricter binding be wanted.</td>
+  </tr>
+</table>
+
+<div class="banner bad">
+  <strong>Cross-cutting residual: historical credential exposure.</strong> The fixture's AWS access key ID and
+  account ID were removed from the working tree and GitHub branch history was rewritten (69 commits, tree
+  hash unchanged). They remain reachable from GitHub <code>refs/pull/1/head</code> and
+  <code>refs/pull/2/head</code>, which are read-only and can only be purged by GitHub Support, and from the
+  Amazon remote's <code>main</code> and <code>dev</code>, where GitFarm's fast-forward-only hook blocks the rewrite
+  and its delete-and-recreate workaround retains the old objects behind a hidden ref by design.
+  <strong>Both values should be treated as permanently disclosed.</strong> The key is an expired <code>ASIA</code>
+  temporary credential; the account ID is not itself a credential and belongs to the fixture's original author.
+</div>
+
+<h2>Changes to the anti-pattern assessment</h2>
+<table>
+  <tr><th>Anti-pattern (v1)</th><th>v2 status</th></tr>
+  <tr><td>Fail-open / insecure defaults</td><td><span class="pill p-ok">Removed</span> — verification fails closed</td></tr>
+  <tr><td>Trusting unverified input (<code>verify_signature=False</code>)</td><td><span class="pill p-ok">Removed</span> — JWKS verification in place</td></tr>
+  <tr><td>Authorization bypass built in as a feature</td><td><span class="pill p-ok">Removed</span> — per-domain scopes replace the bypass</td></tr>
+  <tr><td>Over-broad permissions / wildcard IAM</td><td><span class="pill p-ok">Substantially reduced</span> — remaining wildcards are AWS-mandated or path-bounded</td></tr>
+  <tr><td>Secrets in CI output &amp; telemetry</td><td><span class="pill p-ok">Removed</span> — secret read from Secrets Manager at point of use</td></tr>
+  <tr><td>No security gate in the pipeline</td><td><span class="pill p-warn">Partially addressed</span> — scan job reports but does not block</td></tr>
+  <tr><td>Verbose errors &amp; DEBUG logging of claims</td><td><span class="pill p-ok">Removed</span> — DEBUG off; error details and tracebacks no longer returned to callers</td></tr>
+  <tr><td>Publicly exposed service with no rate limiting / WAF / quota</td><td><span class="pill p-warn">Unchanged</span> — detection added, prevention not</td></tr>
+  <tr><td>Destructive removal policies</td><td><span class="pill p-ok">Addressed for non-dev</span> — dev retains <code>DESTROY</code> by design</td></tr>
+  <tr><td>Mutable dependency references</td><td><span class="pill p-ok">Removed</span> — actions, base images and packages all pinned, and the pins now audited (13 advisories found and fixed)</td></tr>
+  <tr><td>Missing detection &amp; response</td><td><span class="pill p-warn">Partially addressed</span> — spend alarms, authz audit logging, tracing on the auth-path Lambda; no notification target or authz-failure alarm</td></tr>
+  <tr><td>Account-identifying resource naming</td><td><span class="pill p-ok">Removed</span> — hashed domain slug</td></tr>
+</table>
+
+<h2>Prioritised recommendations</h2>
+<ol>
+  <li><strong>Close TS003 — one setting remains.</strong> Add <em>required reviewers</em> to the
+      <code>dev</code> environment in repository settings. The trust policy is already scoped to
+      <code>environment:dev</code> and <code>iam:*</code> is already removed, so this is the last of the three
+      enabling conditions and the only one the repository cannot control. Until it is set, a PR can still
+      obtain credentials — it simply cannot escalate beyond this stack's own resources.</li>
+  <li><span style="color:#1b7f37;font-weight:600">DONE</span> <strong>Dependency audit made recurring.</strong>
+      The one-off <code>pip-audit</code> run found 13 advisories frozen by the pins, including 6 in the JWT
+      library enforcing TS002. It is now a step in the <code>security-scan</code> job, so pins are audited on
+      every PR rather than once. Still reporting only — see the gate recommendation below.</li>
+  <li><strong>Restore the scanner exclusions, then make the pipeline gate real</strong> (TS017).
+      <code>.ash/.ash.yaml</code> is no longer tracked, so the noise it removed is back: 69 findings from a
+      fresh clone versus 0 with it present. The artifact exclusions (<code>cdk.out/</code>, notebook output)
+      excuse no risk and are safe to re-add; gating before that would make the job noise.</li>
+  <li><strong>Alarm on authorization failures</strong> (TS018). The audit logs already emit
+      <code>Access denied to tool</code> and token-rejection events; a metric filter on those is the cheapest
+      meaningful detection upgrade.</li>
+  <li><strong>Add a reserved-concurrency limit to <code>PreTokenFn</code></strong> (CKV_AWS_115) once a safe
+      ceiling is measured — it bounds cost and blast radius, but too low a value fails sign-ins under load.</li>
+  <li><strong>Revisit TS004 with a Bedrock Guardrail</strong> if this pattern is adapted for real tools; the
+      prompt-level attempt was reverted for good reason.</li>
+  <li><strong>Before production:</strong> require MFA (COG2), consider Cognito Plus (COG8), and use a CMK for the
+      M2M secret — all currently accepted for a dev demo.</li>
+</ol>
+
+<h2>Appendix — Where each mitigation lives</h2>
+<p>
+  Line numbers are for the tree described at the top of this document. Provided so each claim above can be
+  located and re-reviewed rather than taken on trust; a mitigation you cannot find is a mitigation you cannot
+  audit.
+</p>
+<table>
+  <tr><th>Threat</th><th>Control</th><th>Location</th></tr>
+  <tr><td>TS001, TS016</td><td>OR-semantics authorization predicate; no M2M bypass</td><td><code>mcp-server/src/auth/middleware.py:41</code> (<code>_should_trim</code>)</td></tr>
+  <tr><td>TS001</td><td>Per-domain scopes declared on gated tools</td><td><code>mcp-server/server.py</code> (<code>auth_meta(roles=…, scopes=…)</code>)</td></tr>
+  <tr><td>TS001</td><td>Cognito resource-server scopes; CI client grant; user client deliberately <em>not</em> granted tool scopes</td><td><code>infrastructure/stack.py</code> (<code>MCPRS</code>, <code>M2MClient</code>, <code>UserClient</code>)</td></tr>
+  <tr><td>TS002, TS015, TS019</td><td>JWKS client (cached)</td><td><code>mcp-server/src/auth/utils.py:36</code></td></tr>
+  <tr><td>TS002, TS015, TS019</td><td>Signature + issuer + expiry verification, fail-closed</td><td><code>mcp-server/src/auth/utils.py:49</code> (<code>_decode_verified</code>; <code>token_use</code> check at :55)</td></tr>
+  <tr><td>TS005</td><td><code>custom:roles</code> immutable</td><td><code>infrastructure/stack.py:101</code></td></tr>
+  <tr><td>TS007</td><td>Bedrock scoped to 3 exact ARNs</td><td><code>infrastructure/roles.py:87</code> (<code>bedrock_model_resources</code>)</td></tr>
+  <tr><td>TS007</td><td>A2A scoped to the named MCP runtime</td><td><code>infrastructure/roles.py:98</code> (<code>a2a_resources</code>)</td></tr>
+  <tr><td>TS007</td><td>ECR split: token on <code>*</code>, image-pull on <code>repository/*</code></td><td><code>infrastructure/roles.py</code> (<code>ECRTokenAccess</code> / <code>ECRImageAccess</code>)</td></tr>
+  <tr><td>TS008</td><td><code>LOG_LEVEL=INFO</code> on both runtimes</td><td><code>infrastructure/stack.py</code> (runtime <code>environment_variables</code>)</td></tr>
+  <tr><td>TS008</td><td>Error details and tracebacks withheld from callers</td><td><code>mcp-server/server.py:36</code></td></tr>
+  <tr><td>TS009</td><td>Hashed account slug for the public domain prefix</td><td><code>infrastructure/stack.py:32</code> (<code>_account_slug</code>)</td></tr>
+  <tr><td>TS010, TS018</td><td>Bedrock spend alarms</td><td><code>infrastructure/stack.py:300</code></td></tr>
+  <tr><td>TS011</td><td>Stage-conditional removal policy</td><td><code>infrastructure/stack.py:21</code> (<code>_removal_policy</code>)</td></tr>
+  <tr><td>TS012, TS013</td><td>Base image digest pins</td><td><code>agent/Dockerfile:3</code>, <code>mcp-server/Dockerfile:3</code></td></tr>
+  <tr><td>TS012, TS013</td><td>Exact dependency pins (post-advisory versions)</td><td><code>agent/pyproject.toml</code>, <code>mcp-server/pyproject.toml</code></td></tr>
+  <tr><td>TS012, TS013</td><td>Action SHA pins (10/10)</td><td><code>.github/workflows/agentcore-eval.yml</code></td></tr>
+  <tr><td>TS014</td><td>Credentials read from Secrets Manager, never a CI output</td><td><code>scripts/agentcore_eval.py:21</code> (<code>_oauth_credentials</code>) + workflow warmup step</td></tr>
+  <tr><td>TS017</td><td>Scan job: bandit, checkov, detect-secrets, pip-audit</td><td><code>.github/workflows/agentcore-eval.yml</code> (<code>security-scan</code>)</td></tr>
+  <tr><td>TS017</td><td>Scanner scope/suppression config <em>(no longer versioned — local only, <code>.gitignore</code>d)</em></td><td><s><code>.ash/.ash.yaml</code></s> — see ASH-Analysis.html Appendix A for contents</td></tr>
+  <tr><td>TS018</td><td>X-Ray tracing on the auth-path Lambda</td><td><code>infrastructure/stack.py:79</code></td></tr>
+  <tr><td>TS003</td><td>Environment gate (<em>inert until reviewers configured</em>)</td><td><code>.github/workflows/agentcore-eval.yml</code> (<code>environment: dev</code>)</td></tr>
+</table>
+
+<h3>How to re-verify the two authorization controls</h3>
+<p>These are the mitigations where a silent regression would be least visible, so they are worth re-testing
+   directly rather than inferring from a passing notebook:</p>
+<pre># TS001 — a scope must not grant a domain it does not name.
+#   Request a token with only mcp/invoke, ask the agent for a stock price:
+#   expected = the finance tool is NOT used. Then request mcp/finance: expected = $175.50.
+#   MCP logs the decision either way ("Access denied to tool" / "Tool execution authorized").
+
+# TS002 — forged tokens must be rejected inside the container.
+docker run --rm -e USER_POOL_ID=&lt;pool&gt; -e AWS_DEFAULT_REGION=&lt;region&gt; &lt;mcp-image&gt; python -c "
+from src.auth.utils import _decode_verified
+_decode_verified('&lt;valid token&gt;')            # accepted
+_decode_verified('&lt;token with last 3 chars changed&gt;')  # InvalidSignatureError
+_decode_verified('&lt;alg:none forgery&gt;')        # PyJWKClientError
+"</pre>
+<p class="meta">
+  A note on interpreting notebook results: notebook 01's RBAC assertions read the agent's natural-language
+  reply, so a model refusal can present as an authorization failure. During this work a 5/6 result was traced
+  to the model declining to call a tool it was permitted to use — MCP logs showed the call authorized, and the
+  cause was a tool docstring advertising a role requirement. Check the MCP authorization logs before
+  concluding that RBAC has regressed.
+</p>
+
+<p class="meta" style="margin-top:2rem; border-top:1px solid var(--line); padding-top:.8rem">
+  Authored analysis, not tool output. Status determinations were verified against the code at
+  <code>2458c83</code> and, where stated, against the deployed stack in <code>ap-southeast-2</code>; both
+  walkthrough notebooks passed at that commit (RBAC 6/6; all four evaluators 1.0). Companion document:
+  <code>ASH-Analysis.html</code> (real ASH v3.5.9 scan, raw output in <code>ash-run/</code> and
+  <code>ash-run-clean/</code>).
+</p>
+
+</body>
+</html>
