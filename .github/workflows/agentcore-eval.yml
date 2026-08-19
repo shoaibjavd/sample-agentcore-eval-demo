@@ -84,10 +84,28 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Fail fast with an actionable message. If role-to-assume is empty, the credentials
+      # action skips OIDC, falls back to the default credential chain, retries 12 times and
+      # then reports a generic "Could not load credentials from any providers" — which does
+      # not say that the secret is missing.
+      - name: Check AWS_ROLE_ARN is configured
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          if [ -z "${AWS_ROLE_ARN}" ]; then
+            echo "::error::Secret AWS_ROLE_ARN is not available to this job. Create an IAM role for GitHub OIDC and add its ARN under Settings → Secrets and variables → Actions (repository secret), or as a secret on the 'dev' environment this job targets."
+            exit 1
+          fi
+          echo "AWS_ROLE_ARN is set (${#AWS_ROLE_ARN} characters)."
+
       - uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          # v4 defaulted this to true; v6 declares no default. Later steps (aws CLI, boto3,
+          # cdk) read credentials from the environment, so set it explicitly rather than
+          # relying on the action's internal default.
+          output-env-credentials: true
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
