@@ -11,3 +11,4 @@ build/
 scripts/evals_results/
 notebooks/eval_output*
 
+.ash/

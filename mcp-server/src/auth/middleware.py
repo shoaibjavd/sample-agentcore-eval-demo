@@ -64,31 +64,30 @@ class AuthMiddleware(Middleware):
     def _should_trim(self, component: FastMCPComponent, roles: list[str], scopes: list[str]) -> bool:
         """Decide whether to hide a component from the caller.
 
-        M2M tokens (CI pipelines) have scopes but no roles — they bypass role checks
-        so all tools are available for evaluation purposes.
-        User tokens must match required roles.
+        A gated component declares the credentials that grant it — roles, scopes, or both
+        (see auth_meta()). The caller is authorized if it presents *any* of them:
 
-        Security: M2M access is logged for audit trail. The M2M client is restricted
-        to the mcp/invoke scope at the Cognito level, limiting token acquisition to
-        authorized clients only.
+          - user tokens satisfy the role requirement via the custom:roles claim
+          - machine (client_credentials) tokens satisfy the scope requirement
+
+        There is deliberately no blanket bypass for machine callers: a machine caller
+        reaches only what its granted scopes name, and a newly added gated tool is denied
+        until a scope is explicitly granted in the CDK stack. Deny-by-default matters most
+        for tools added later, which must not become reachable simply by shipping.
         """
-        # M2M tokens have scopes but no roles — bypass role checks for CI evaluation
-        if scopes and not roles:
-            # Must have explicit mcp/invoke scope to proceed
-            if "mcp/invoke" not in scopes:
-                logger.warning("M2M token missing mcp/invoke scope — denying access")
-                return True
-            logger.info(
-                "M2M access granted to tool",
-                extra={"tool": getattr(component, "name", "unknown"), "scopes": scopes},
-            )
-            return False
         meta = component.meta or {}
-        if ROLES_META_KEY in meta and not any(r in roles for r in meta[ROLES_META_KEY]):
-            return True
-        if SCOPES_META_KEY in meta and not any(s in scopes for s in meta[SCOPES_META_KEY]):
-            return True
-        return False
+        required_roles = meta.get(ROLES_META_KEY) or []
+        required_scopes = meta.get(SCOPES_META_KEY) or []
+
+        if not required_roles and not required_scopes:
+            return False  # ungated component
+
+        if required_roles and any(r in roles for r in required_roles):
+            return False
+        if required_scopes and any(s in scopes for s in required_scopes):
+            return False
+
+        return True
 
     def _strip_meta(self, component: FastMCPComponent) -> FastMCPComponent:
         """Remove internal auth metadata (Roles/Scopes) before returning to caller."""

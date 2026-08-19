@@ -221,8 +221,10 @@ async def handle_request(payload, request_context: RequestContext = None):
         if user_mcp_client:
             try:
                 user_mcp_client.__exit__(None, None, None)
-            except Exception:
-                pass
+            except Exception as e:
+                # Teardown failure must not mask the request result, but it should
+                # not be swallowed silently either.
+                logger.warning(f"Failed to close user MCP client: {e}")
 
 
 if __name__ == "__main__":
