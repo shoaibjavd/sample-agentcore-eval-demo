@@ -199,20 +199,98 @@ exactly as intended — it just waits for one approval on untrusted contribution
 
 ### 3. Grant only what the workflow needs
 
-The workflow deploys a CDK stack, so it needs CloudFormation, ECR, Cognito, Secrets Manager, AgentCore,
-CloudWatch and the CDK bootstrap SSM parameter, plus `bedrock:InvokeModel` for evaluation. It also needs to
-create the two execution roles in `infrastructure/roles.py` — but that requires only role and policy
-operations, **not `iam:*`**:
+`iam:*` on `Resource: "*"` lets anything that assumes the role create or modify arbitrary roles and
+policies — that is account takeover, not a deployment permission. The policy below is what this workflow
+actually requires. Replace `<ACCOUNT_ID>`, and `AgentCoreCICDStack-*` if you rename the stack.
 
-```
-iam:CreateRole, iam:DeleteRole, iam:GetRole, iam:PassRole, iam:TagRole,
-iam:AttachRolePolicy, iam:DetachRolePolicy, iam:PutRolePolicy, iam:DeleteRolePolicy,
-iam:GetRolePolicy, iam:ListRolePolicies, iam:ListAttachedRolePolicies
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CdkDeployPlumbing",
+      "Effect": "Allow",
+      "Action": ["cloudformation:*", "ecr:*", "logs:*"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CdkBootstrapVersionAndRoles",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameter", "sts:AssumeRole"],
+      "Resource": [
+        "arn:aws:ssm:*:<ACCOUNT_ID>:parameter/cdk-bootstrap/*",
+        "arn:aws:iam::<ACCOUNT_ID>:role/cdk-*"
+      ]
+    },
+    {
+      "Sid": "StackResourceManagement",
+      "Effect": "Allow",
+      "Action": ["cognito-idp:*", "bedrock-agentcore:*", "cloudwatch:*"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EvaluationModelInvocation",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "StackSecrets",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret",
+        "secretsmanager:CreateSecret", "secretsmanager:DeleteSecret", "secretsmanager:TagResource",
+        "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecret", "secretsmanager:GetResourcePolicy"
+      ],
+      "Resource": "arn:aws:secretsmanager:*:<ACCOUNT_ID>:secret:agentcore/*"
+    },
+    {
+      "Sid": "TraceReadForEvaluation",
+      "Effect": "Allow",
+      "Action": ["xray:BatchGetTraces", "xray:GetTraceSummaries"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "StackExecutionRolesOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:PassRole", "iam:TagRole", "iam:UntagRole",
+        "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
+        "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::<ACCOUNT_ID>:role/AgentCoreCICDStack-*",
+        "arn:aws:iam::<ACCOUNT_ID>:role/cdk-*"
+      ]
+    }
+  ]
+}
 ```
 
-Scope those to the stack's own role paths where practical. `iam:*` on `Resource: "*"` lets anything that
-assumes the role create or modify arbitrary roles and policies, which is account takeover rather than a
-deployment permission.
+Four of these are easy to miss:
+
+- **`sts:AssumeRole` on `cdk-*`.** CDK bootstrap v2 does the real work through its own deploy, file-publishing
+  and cfn-exec roles. Without permission to assume them, `cdk deploy` fails immediately regardless of what
+  else the role can do.
+- **`iam:UpdateAssumeRolePolicy`.** `infrastructure/roles.py` adds a statement to the agent role's trust
+  policy, so creating the role is not enough on its own.
+- **Secrets Manager.** The workflow reads the M2M client secret directly rather than passing it through step
+  outputs, so it needs read access as well as the create/delete the stack performs.
+- **The IAM statement must stay resource-scoped.** Scoped to the stack's own role names, a compromised run can
+  manage this stack's roles and nothing else.
+
+Worth verifying rather than assuming, since a missing action only shows up mid-deploy:
+
+```bash
+aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::<ACCOUNT_ID>:role/<ROLE_NAME> \
+  --action-names sts:AssumeRole iam:CreateRole secretsmanager:GetSecretValue \
+  --resource-arns arn:aws:iam::<ACCOUNT_ID>:role/cdk-hnb659fds-deploy-role-<ACCOUNT_ID>-<REGION>
+```
+
+Confirm the escalation paths are denied too — `iam:CreateUser`, `iam:CreateAccessKey`, `iam:PutUserPolicy`,
+and `iam:CreateRole` against a role outside the stack's own names should all come back `implicitDeny`.
 
 ### 4. Add the role ARN as a secret
 
