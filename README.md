@@ -18,10 +18,45 @@ Reference implementation for running automated evaluations on an AgentCore-hoste
 2. **Header passthrough:** `request_header_allowlist=["Authorization"]` on both runtimes ensures the JWT reaches the agent and MCP containers.
 3. **Tool-level authorization (`AuthMiddleware`):** Uses `fastmcp.server.dependencies.get_http_headers()` to read the JWT, verifies its signature against the pool's JWKS (issuer, expiry and `token_use` are checked; it fails closed), then authorizes each tool against the `meta` it declares. A gated tool requires a matching `custom:roles` entry **or** a matching scope — user tokens satisfy the role requirement, machine tokens the scope requirement. A newly added gated tool is denied until its scope is explicitly granted.
 
+## Model Guardrail
+
+A Bedrock Guardrail is attached to the agent's model, so filtering is enforced by the platform
+rather than by asking the model to behave. It applies:
+
+- **Content filters** on hate, insults, sexual content, violence and misconduct, on both input
+  and output.
+- **Prompt-attack detection** on input. This matters most here: the agent forwards the caller's
+  JWT to role-gated MCP tools, so a successful injection could try to misuse a tool the caller
+  can otherwise reach.
+- **A denied topic** covering attempts to extract credentials, secrets, tokens or environment
+  variables.
+- **A profanity word list**, and **PII rules** that block credentials and financial identifiers
+  (AWS keys, passwords, card and SSN) and mask contact details (email, phone).
+
+Two filters are deliberately *not* configured, because they would break correct behaviour:
+
+- **No financial or investment denied topic.** `What is the stock price of AAPL?` is a supported
+  request; a topic filter there would block normal use.
+- **No `NAME` or `ADDRESS` PII rule.** The HR tool returns department names and the finance tool
+  returns ticker symbols, and masking those would corrupt correct answers and depress the very
+  evaluation scores this pipeline measures.
+
+The guardrail is referenced by published version, not `DRAFT`, so editing it cannot silently
+change behaviour under a running agent. `GUARDRAIL_ID` and `GUARDRAIL_VERSION` are passed to the
+runtime together — the agent sends a guardrail configuration only when both are present, so it
+still runs when the guardrail is absent.
+
+A CloudWatch alarm fires on `InvocationsIntervened` in the `AWS/Bedrock/Guardrails` namespace.
+An intervention means either a genuine attack or a filter too aggressive for legitimate traffic,
+and both are worth investigating. Note that this metric can take several minutes to appear after
+an intervention.
+
 ## Repo Structure
 
 ```
 ├── README.md                        # This file
+├── LICENSE                          # MIT-0
+├── THIRD-PARTY-LICENSES.md          # Licence summary derived from the SBOMs
 ├── app.py                           # CDK entry point
 ├── pyproject.toml                   # Root CDK dependencies
 ├── cdk.json                         # CDK config
@@ -51,6 +86,9 @@ Reference implementation for running automated evaluations on an AgentCore-hoste
 │   ├── agentcore_eval.py            # Eval script (live invocation)
 │   ├── evaluate_stored_traces.py    # Evaluate pre-collected fixtures
 │   └── eval_dataset.json            # Test prompts
+├── docs/
+│   ├── sbom/                        # CycloneDX SBOMs, generated from the built images
+│   └── security/                    # Scan results and threat model
 ├── .github/
 │   └── workflows/
 │       └── agentcore-eval.yml       # CI/CD pipeline

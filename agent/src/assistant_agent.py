@@ -1,3 +1,5 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
 """Assistant Agent — Strands-based agent deployed on Bedrock AgentCore.
 
 Connects to an MCP server for role-gated tools (finance, HR, datetime).
@@ -23,7 +25,23 @@ from strands.models import BedrockModel
 import logging
 
 app = BedrockAgentCoreApp()
-model = BedrockModel(model_id=os.getenv("MODEL_ID", "au.anthropic.claude-haiku-4-5-20251001-v1:0"))
+
+# Guardrail configuration is optional so the agent still runs when it is absent (local
+# development, or a stack deployed before the guardrail existed). The model client only
+# sends a guardrail configuration when both an id and a version are present, so they are
+# treated as a pair rather than applied independently.
+_guardrail_id = os.getenv("GUARDRAIL_ID")
+_guardrail_version = os.getenv("GUARDRAIL_VERSION")
+_model_kwargs = {"model_id": os.getenv("MODEL_ID", "au.anthropic.claude-haiku-4-5-20251001-v1:0")}
+if _guardrail_id and _guardrail_version:
+    _model_kwargs.update(
+        guardrail_id=_guardrail_id,
+        guardrail_version=_guardrail_version,
+        # Record which policy intervened, so a blocked request can be diagnosed as an
+        # attack or as an over-tight filter rather than looking like a model failure.
+        guardrail_trace="enabled",
+    )
+model = BedrockModel(**_model_kwargs)
 
 _m2m_mcp_client = None
 _m2m_initialized = False

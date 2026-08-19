@@ -189,8 +189,9 @@ jobs:
                   sys.exit(f'{name} runtime did not reach READY in time')
 
           print('Warming up MCP server...', flush=True)
-          # Credentials are read from Secrets Manager and used in-process. urllib rather than
-          # curl keeps the client secret out of the process argument list entirely.
+          # Credentials are read from Secrets Manager and used in-process. Issuing the token
+          # request through urllib rather than shelling out to an external HTTP client keeps
+          # the client secret out of the process argument list entirely.
           secrets_client = boto3.client('secretsmanager', region_name=REGION)
           creds = json.loads(
               secrets_client.get_secret_value(SecretId='agentcore/dev/m2m-client')['SecretString']

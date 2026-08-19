@@ -1,3 +1,5 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
 """Pre-token-generation Lambda V2: copies custom:roles into access token claims.
 
 Security: Only roles in the VALID_ROLES allowlist are injected into the token.

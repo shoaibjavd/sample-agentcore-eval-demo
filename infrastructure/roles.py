@@ -1,3 +1,5 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
 import aws_cdk as cdk
 from aws_cdk import aws_iam as iam
 from constructs import Construct
@@ -24,6 +26,10 @@ class MCPServerRole(Construct):
                             resources=[f"arn:aws:logs:{region}:{account}:log-group:/aws/bedrock-agentcore/runtimes/*"],
                         ),
                         iam.PolicyStatement(
+                            # DescribeLogGroups is a list operation: it is evaluated against
+                            # the log-group collection, not an individual group, so naming
+                            # one group would deny the call. Held to this account and region
+                            # and paired with write-only access to the runtime's own group.
                             actions=["logs:DescribeLogGroups"],
                             resources=[f"arn:aws:logs:{region}:{account}:log-group:*"],
                         ),
@@ -33,8 +39,11 @@ class MCPServerRole(Construct):
                         ),
                         iam.PolicyStatement(
                             sid="ECRTokenAccess",
+                            # GetAuthorizationToken returns the registry credential itself
+                            # and so has no repository to scope to; AWS accepts only "*".
+                            # Pulls are restricted separately by ECRImageAccess above.
                             actions=["ecr:GetAuthorizationToken"],
-                            resources=["*"],  # ecr:GetAuthorizationToken does not support resource-level permissions
+                            resources=["*"],
                         ),
                         iam.PolicyStatement(
                             sid="ECRImageAccess",
@@ -42,6 +51,13 @@ class MCPServerRole(Construct):
                             resources=[f"arn:aws:ecr:{region}:{account}:repository/*"],
                         ),
                         iam.PolicyStatement(
+                            # X-Ray write APIs are account-level and accept no resource
+                            # qualifier: segments are addressed by trace id, which does not
+                            # exist until runtime, and the sampling-rule reads are global.
+                            # AWS documents "*" as the only valid resource for these four
+                            # actions, so this cannot be narrowed further. Scope is instead
+                            # bounded by the action list — write-and-sample only, no read
+                            # of other traces.
                             actions=["xray:PutTraceSegments", "xray:PutTelemetryRecords", "xray:GetSamplingRules", "xray:GetSamplingTargets"],
                             resources=["*"],
                         ),
@@ -73,6 +89,7 @@ class AgentCoreRuntimeRole(Construct):
         description: str,
         model_id: str = DEFAULT_MODEL_ID,
         a2a_target_runtime_arns: list[str] | None = None,
+        guardrail_arns: list[str] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -104,6 +121,13 @@ class AgentCoreRuntimeRole(Construct):
             # No known targets: grant nothing rather than the whole account.
             a2a_resources = [f"arn:aws:bedrock-agentcore:{region}:{account}:agent-runtime/__none__"]
 
+        # ApplyGuardrail is granted only on the guardrails this agent is configured with.
+        # Without a guardrail the grant resolves to a non-existent ARN rather than "*", so
+        # adding a guardrail later is an explicit change rather than a silent widening.
+        guardrail_resources = guardrail_arns or [
+            f"arn:aws:bedrock:{region}:{account}:guardrail/__none__"
+        ]
+
         self.role = iam.Role(
             self,
             "Role",
@@ -119,6 +143,9 @@ class AgentCoreRuntimeRole(Construct):
                         ),
                         iam.PolicyStatement(
                             sid="ECRTokenAccess",
+                            # GetAuthorizationToken returns the registry credential itself
+                            # and so has no repository to scope to; AWS accepts only "*".
+                            # Pulls are restricted separately by ECRImageAccess above.
                             actions=["ecr:GetAuthorizationToken"],
                             resources=["*"],
                         ),
@@ -127,6 +154,10 @@ class AgentCoreRuntimeRole(Construct):
                             resources=[f"arn:aws:logs:{region}:{account}:log-group:/aws/bedrock-agentcore/runtimes/*"],
                         ),
                         iam.PolicyStatement(
+                            # DescribeLogGroups is a list operation: it is evaluated against
+                            # the log-group collection, not an individual group, so naming
+                            # one group would deny the call. Held to this account and region
+                            # and paired with write-only access to the runtime's own group.
                             actions=["logs:DescribeLogGroups"],
                             resources=[f"arn:aws:logs:{region}:{account}:log-group:*"],
                         ),
@@ -135,10 +166,21 @@ class AgentCoreRuntimeRole(Construct):
                             resources=[f"arn:aws:logs:{region}:{account}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*"],
                         ),
                         iam.PolicyStatement(
+                            # X-Ray write APIs are account-level and accept no resource
+                            # qualifier: segments are addressed by trace id, which does not
+                            # exist until runtime, and the sampling-rule reads are global.
+                            # AWS documents "*" as the only valid resource for these four
+                            # actions, so this cannot be narrowed further. Scope is instead
+                            # bounded by the action list — write-and-sample only, no read
+                            # of other traces.
                             actions=["xray:PutTraceSegments", "xray:PutTelemetryRecords", "xray:GetSamplingRules", "xray:GetSamplingTargets"],
                             resources=["*"],
                         ),
                         iam.PolicyStatement(
+                            # PutMetricData takes no resource ARN — CloudWatch authorises it
+                            # by namespace instead, which the condition below pins. The
+                            # wildcard resource is therefore required, and the effective
+                            # scope is the single namespace named in the condition.
                             actions=["cloudwatch:PutMetricData"],
                             resources=["*"],
                             conditions={"StringEquals": {"cloudwatch:namespace": "bedrock-agentcore"}},
@@ -147,6 +189,11 @@ class AgentCoreRuntimeRole(Construct):
                             sid="BedrockModelInvocation",
                             actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
                             resources=bedrock_model_resources,
+                        ),
+                        iam.PolicyStatement(
+                            sid="BedrockGuardrail",
+                            actions=["bedrock:ApplyGuardrail"],
+                            resources=guardrail_resources,
                         ),
                         iam.PolicyStatement(
                             sid="A2AInvocation",
