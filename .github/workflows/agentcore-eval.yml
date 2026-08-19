@@ -75,11 +75,17 @@ jobs:
 
   evaluate:
     runs-on: ubuntu-latest
-    # A same-repo PR can run this workflow under the AWS OIDC role. Naming an
-    # environment lets you require reviewer approval before credentials are issued —
-    # configure "Required reviewers" on the `dev` environment in repo settings, otherwise
-    # this is a label only. Also scope the role's trust policy to this repo and to
-    # `pull_request` refs so a fork or another repo cannot assume it.
+    # This job deploys to AWS on a pull request, which is the point of the demo — the
+    # evaluation result gates the merge. That also means a PR causes credentials to be
+    # issued, so the safety comes from the role rather than from the trigger:
+    #   - the role's trust policy should name repo AND environment
+    #     ("repo:<OWNER>/<REPO>:environment:dev", StringEquals, not ":*"), so a token is
+    #     only issued for a job that declares this environment;
+    #   - the `dev` environment should require a reviewer, so an untrusted PR cannot reach
+    #     AWS without a maintainer approving the run;
+    #   - the role should not hold iam:* on Resource:*.
+    # Naming the environment here is what makes the first two possible; on its own it
+    # grants nothing. See "CI/CD Setup" in README.md.
     environment: dev
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -150,52 +156,91 @@ jobs:
       - name: Wait for runtimes READY
         run: |
           pip install boto3
-          python3 -c "
-          import boto3, time, sys
-          client = boto3.client('bedrock-agentcore-control', region_name='${{ env.AWS_REGION }}')
-          for name, rid in [('MCP', '${{ steps.cdk.outputs.mcp_id }}'), ('Agent', '${{ steps.cdk.outputs.agent_id }}')]:
+          # Quoted heredoc ('PY'): the shell performs no expansion or quote removal inside,
+          # so the Python below is passed verbatim. A `python3 -c "..."` wrapper would have
+          # its inner quotes consumed by the shell. Workflow expressions are substituted by
+          # Actions before the shell runs, so interpolated values still work here.
+          python3 <<'PY'
+          import json
+          import sys
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          import boto3
+
+          REGION = '${{ env.AWS_REGION }}'
+          MCP_ID = '${{ steps.cdk.outputs.mcp_id }}'
+          AGENT_ID = '${{ steps.cdk.outputs.agent_id }}'
+          TOKEN_ENDPOINT = '${{ steps.cdk.outputs.token_endpoint }}'
+
+          control = boto3.client('bedrock-agentcore-control', region_name=REGION)
+          for name, runtime_id in [('MCP', MCP_ID), ('Agent', AGENT_ID)]:
               for _ in range(60):
-                  s = client.get_agent_runtime(agentRuntimeId=rid)['status']
-                  print(f'{name} Status: {s}')
-                  if s == 'READY': break
-                  if 'FAILED' in s: sys.exit(1)
+                  status = control.get_agent_runtime(agentRuntimeId=runtime_id)['status']
+                  print(f'{name} status: {status}', flush=True)
+                  if status == 'READY':
+                      break
+                  if 'FAILED' in status:
+                      sys.exit(f'{name} runtime failed: {status}')
                   time.sleep(10)
               else:
-                  sys.exit(1)
-          print('Warming up MCP server...')
-          import urllib.parse, json, subprocess
-          # Read client credentials from Secrets Manager rather than interpolating the
-          # secret into a command line, where it would appear in the process list and
-          # risk landing in logs.
-          sm = boto3.client('secretsmanager', region_name='${{ env.AWS_REGION }}')
-          creds = json.loads(sm.get_secret_value(SecretId='agentcore/dev/m2m-client')['SecretString'])
-          token_resp = subprocess.run([
-              'curl', '-s', '-X', 'POST', '${{ steps.cdk.outputs.token_endpoint }}',
-              '-H', 'Content-Type: application/x-www-form-urlencoded',
-              '--data-urlencode', 'grant_type=client_credentials',
-              '--data-urlencode', f"client_id={creds['client_id']}",
-              '--data-urlencode', f"client_secret={creds['client_secret']}",
-              '--data-urlencode', 'scope=mcp/invoke',
-          ], capture_output=True, text=True)
-          token = json.loads(token_resp.stdout)['access_token']
-          mcp_arn = 'arn:aws:bedrock-agentcore:${{ env.AWS_REGION }}:' + boto3.client('sts').get_caller_identity()['Account'] + ':runtime/${{ steps.cdk.outputs.mcp_id }}'
+                  sys.exit(f'{name} runtime did not reach READY in time')
+
+          print('Warming up MCP server...', flush=True)
+          # Credentials are read from Secrets Manager and used in-process. urllib rather than
+          # curl keeps the client secret out of the process argument list entirely.
+          secrets_client = boto3.client('secretsmanager', region_name=REGION)
+          creds = json.loads(
+              secrets_client.get_secret_value(SecretId='agentcore/dev/m2m-client')['SecretString']
+          )
+          token_body = urllib.parse.urlencode({
+              'grant_type': 'client_credentials',
+              'client_id': creds['client_id'],
+              'client_secret': creds['client_secret'],
+              'scope': 'mcp/invoke',
+          }).encode()
+          token_request = urllib.request.Request(
+              TOKEN_ENDPOINT,
+              data=token_body,
+              headers={'Content-Type': 'application/x-www-form-urlencoded'},
+          )
+          with urllib.request.urlopen(token_request, timeout=30) as response:
+              token = json.loads(response.read())['access_token']
+
+          account = boto3.client('sts', region_name=REGION).get_caller_identity()['Account']
+          mcp_arn = f'arn:aws:bedrock-agentcore:{REGION}:{account}:runtime/{MCP_ID}'
           encoded_arn = urllib.parse.quote(mcp_arn, safe='')
-          url = f'https://bedrock-agentcore.${{ env.AWS_REGION }}.amazonaws.com/runtimes/{encoded_arn}/invocations?qualifier=DEFAULT'
-          for attempt in range(10):
-              resp = subprocess.run([
-                  'curl', '-s', '-o', '/dev/null', '-w', '%{http_code}',
-                  '-X', 'POST', url,
-                  '-H', f'Authorization: Bearer {token}',
-                  '-H', 'Content-Type: application/json',
-                  '-d', '{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"id\":1}',
-              ], capture_output=True, text=True)
-              code = resp.stdout.strip()
-              print(f'MCP warmup attempt {attempt+1}: HTTP {code}')
-              if code == '200':
+          url = (
+              f'https://bedrock-agentcore.{REGION}.amazonaws.com'
+              f'/runtimes/{encoded_arn}/invocations?qualifier=DEFAULT'
+          )
+          payload = json.dumps({'jsonrpc': '2.0', 'method': 'initialize', 'id': 1}).encode()
+
+          for attempt in range(1, 11):
+              warm_request = urllib.request.Request(
+                  url,
+                  data=payload,
+                  headers={
+                      'Authorization': f'Bearer {token}',
+                      'Content-Type': 'application/json',
+                      'Accept': 'application/json, text/event-stream',
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(warm_request, timeout=60) as response:
+                      code = response.status
+              except urllib.error.HTTPError as exc:
+                  code = exc.code
+              except Exception as exc:
+                  code = f'{type(exc).__name__}: {exc}'
+              print(f'MCP warmup attempt {attempt}: {code}', flush=True)
+              if code == 200:
                   break
               time.sleep(15)
-          print('MCP server warm, proceeding...')
-          "
+          print('MCP server warm, proceeding...', flush=True)
+          PY
 
       # --- Run evaluation ---
       - name: Install eval dependencies

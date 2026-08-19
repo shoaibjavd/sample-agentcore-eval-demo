@@ -150,9 +150,162 @@ python3 agentcore_eval.py
 
 ## CI/CD Setup
 
-1. Create an IAM role for GitHub OIDC with permissions to deploy CDK stacks, manage AgentCore runtimes, and invoke Cognito.
-2. Add the role ARN as a GitHub secret: `AWS_ROLE_ARN`. <!-- pragma: allowlist secret --> <!-- reason: GitHub Actions secret NAME, not a credential value -->
-3. Push a PR to `main` — the workflow deploys, evaluates, posts results to the PR, and tears down automatically.
+The workflow runs on every pull request to `main`: it deploys the stack, invokes the agent, scores the
+responses and fails the PR if any metric falls below `EVAL_THRESHOLD`. That means **a pull request causes
+AWS credentials to be issued**, so the role it assumes needs scoping carefully — a role trusted by
+`repo:OWNER/REPO:*` with `iam:*` permissions can be assumed by any PR in that repo and used to modify IAM.
+
+The three steps below keep the PR-gating behaviour intact while bounding what a PR can do.
+
+### 1. Trust the OIDC provider, scoped to this repo *and* the environment
+
+If the account has no GitHub OIDC provider yet, create one for
+`token.actions.githubusercontent.com` with audience `sts.amazonaws.com` (only one per account is allowed).
+
+Then create a role whose trust policy names **both the repository and the environment**:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com" },
+    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Condition": {
+      "StringEquals": {
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+        "token.actions.githubusercontent.com:sub": "repo:<OWNER>/<REPO>:environment:dev"
+      }
+    }
+  }]
+}
+```
+
+Two details matter:
+
+- **`environment:dev`, not `:*`.** GitHub only issues a token with this subject when the job declares
+  `environment: dev`, which the `evaluate` job does. A trailing `:*` would let any branch, tag or PR in the
+  repo assume the role.
+- **`StringEquals`, not `StringLike`.** With `StringLike` plus a wildcard, a subject you did not intend can
+  match.
+
+### 2. Require a reviewer on the `dev` environment
+
+In **Settings → Environments → `dev`**, add **Required reviewers**.
+
+This is what makes PR-triggered deployment safe: credentials are not issued until a maintainer approves the
+run, so a pull request containing hostile changes cannot reach AWS on its own. The quality gate still works
+exactly as intended — it just waits for one approval on untrusted contributions.
+
+### 3. Grant only what the workflow needs
+
+`iam:*` on `Resource: "*"` lets anything that assumes the role create or modify arbitrary roles and
+policies — that is account takeover, not a deployment permission. The policy below is what this workflow
+actually requires. Replace `<ACCOUNT_ID>`, and `AgentCoreCICDStack-*` if you rename the stack.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CdkDeployPlumbing",
+      "Effect": "Allow",
+      "Action": ["cloudformation:*", "ecr:*", "logs:*"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CdkBootstrapVersionAndRoles",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameter", "sts:AssumeRole"],
+      "Resource": [
+        "arn:aws:ssm:*:<ACCOUNT_ID>:parameter/cdk-bootstrap/*",
+        "arn:aws:iam::<ACCOUNT_ID>:role/cdk-*"
+      ]
+    },
+    {
+      "Sid": "StackResourceManagement",
+      "Effect": "Allow",
+      "Action": ["cognito-idp:*", "bedrock-agentcore:*", "cloudwatch:*"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EvaluationModelInvocation",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "StackSecrets",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret",
+        "secretsmanager:CreateSecret", "secretsmanager:DeleteSecret", "secretsmanager:TagResource",
+        "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecret", "secretsmanager:GetResourcePolicy"
+      ],
+      "Resource": "arn:aws:secretsmanager:*:<ACCOUNT_ID>:secret:agentcore/*"
+    },
+    {
+      "Sid": "TraceReadForEvaluation",
+      "Effect": "Allow",
+      "Action": ["xray:BatchGetTraces", "xray:GetTraceSummaries"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "StackExecutionRolesOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:PassRole", "iam:TagRole", "iam:UntagRole",
+        "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
+        "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::<ACCOUNT_ID>:role/AgentCoreCICDStack-*",
+        "arn:aws:iam::<ACCOUNT_ID>:role/cdk-*"
+      ]
+    }
+  ]
+}
+```
+
+Four of these are easy to miss:
+
+- **`sts:AssumeRole` on `cdk-*`.** CDK bootstrap v2 does the real work through its own deploy, file-publishing
+  and cfn-exec roles. Without permission to assume them, `cdk deploy` fails immediately regardless of what
+  else the role can do.
+- **`iam:UpdateAssumeRolePolicy`.** `infrastructure/roles.py` adds a statement to the agent role's trust
+  policy, so creating the role is not enough on its own.
+- **Secrets Manager.** The workflow reads the M2M client secret directly rather than passing it through step
+  outputs, so it needs read access as well as the create/delete the stack performs.
+- **The IAM statement must stay resource-scoped.** Scoped to the stack's own role names, a compromised run can
+  manage this stack's roles and nothing else.
+
+Worth verifying rather than assuming, since a missing action only shows up mid-deploy:
+
+```bash
+aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::<ACCOUNT_ID>:role/<ROLE_NAME> \
+  --action-names sts:AssumeRole iam:CreateRole secretsmanager:GetSecretValue \
+  --resource-arns arn:aws:iam::<ACCOUNT_ID>:role/cdk-hnb659fds-deploy-role-<ACCOUNT_ID>-<REGION>
+```
+
+Confirm the escalation paths are denied too — `iam:CreateUser`, `iam:CreateAccessKey`, `iam:PutUserPolicy`,
+and `iam:CreateRole` against a role outside the stack's own names should all come back `implicitDeny`.
+
+### 4. Add the role ARN as a secret
+
+Add the role ARN as the repository secret `AWS_ROLE_ARN`. <!-- pragma: allowlist secret --> <!-- reason: GitHub Actions secret NAME, not a credential value -->
+If you define it as an *environment* secret instead, it must be on the `dev` environment, since that is what
+the `evaluate` job targets.
+
+The workflow checks this secret before configuring credentials and fails with an explicit message if it is
+absent — otherwise the credentials action retries twelve times and reports only
+`Could not load credentials from any providers`, which does not mention the secret.
+
+> **Fork pull requests cannot pass.** GitHub withholds secrets from workflows triggered by PRs from forks, so
+> the deploy-and-evaluate job cannot authenticate for external contributions. The `security-scan` job needs no
+> credentials and still runs. If you require the evaluation check for merge, expect to run it on a branch in
+> this repository rather than on a fork PR.
 
 ## Teardown
 
