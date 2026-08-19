@@ -6,7 +6,7 @@ FastMCP server deployed as an AgentCore MCP runtime with role-based access contr
 
 1. **AgentCore (Layer 1):** Validates JWT signature, issuer, and expiry via `authorizer_configuration` before the request reaches the container.
 2. **Header passthrough (Layer 2):** `request_header_allowlist=["Authorization"]` ensures the JWT is forwarded to the MCP server container.
-3. **AuthMiddleware (Layer 3):** `fastmcp.server.dependencies.get_http_headers(include={"authorization"})` reads the JWT from HTTP headers. The middleware decodes claims (without signature verification — already done by Layer 1) and enforces `custom:roles` against tool `meta`. M2M tokens (scopes but no roles) bypass role checks; user tokens must have the required role.
+3. **AuthMiddleware (Layer 3):** `fastmcp.server.dependencies.get_http_headers(include={"authorization"})` reads the JWT from HTTP headers. The middleware **re-verifies the signature** against the pool's JWKS as defence in depth — Layer 1 already validates it, but this layer must not trust claims it has not checked itself. Issuer, expiry and `token_use` are verified (the last because audience is not, and Cognito ID tokens share the same keys and issuer while also carrying `custom:roles`); verification fails closed. Authorization then matches each tool's declared `meta`: a gated tool needs a matching role **or** a matching scope, so user tokens are authorized by `custom:roles` and machine tokens by their granted scopes.
 
 ## Role Configuration
 

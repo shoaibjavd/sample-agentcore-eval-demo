@@ -47,22 +47,32 @@ def auth_meta(roles: list[str] | str | None = None, scopes: list[str] | str | No
 
 
 def _decode_verified(token: str) -> dict:
-    """Decode a JWT, verifying its signature, expiry and issuer.
+    """Decode a JWT, verifying its signature, expiry, issuer and token type.
 
     Cognito access tokens carry no `aud` claim (the audience is `client_id`), so audience
     verification is disabled; the platform authorizer already restricts allowed clients.
+
+    Because audience is not checked, `token_use` must be. Cognito signs ID tokens with the
+    same JWKS keys and the same issuer as access tokens, and ID tokens also carry
+    `custom:roles` — so without this check an ID token would satisfy every other condition
+    here and its role claims would be trusted for tool authorization.
     """
     if _jwk_client is None:
         raise AuthError("USER_POOL_ID is not configured — refusing to trust unverified token")
 
     signing_key = _jwk_client.get_signing_key_from_jwt(token)
-    return jwt.decode(
+    claims = jwt.decode(
         token,
         signing_key.key,
         algorithms=["RS256"],
         issuer=_ISSUER,
         options={"verify_aud": False, "verify_signature": True, "verify_exp": True},
     )
+
+    if claims.get("token_use") != "access":
+        raise AuthError(f"Expected a Cognito access token, got token_use={claims.get('token_use')!r}")
+
+    return claims
 
 
 def get_access_token() -> AccessToken:

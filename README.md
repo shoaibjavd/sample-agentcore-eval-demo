@@ -8,7 +8,7 @@ Reference implementation for running automated evaluations on an AgentCore-hoste
 
 ## Auth Flows
 
-**M2M (CI pipelines):** `client_credentials` grant → Cognito issues access token with scopes only → MCP `AuthMiddleware` sees scopes + no roles → bypasses role checks → all tools accessible.
+**M2M (CI pipelines):** `client_credentials` grant → Cognito issues an access token carrying the scopes granted to the M2M client → MCP `AuthMiddleware` matches those scopes against each tool's declared scope requirement. A machine caller reaches only the tool domains whose scopes it was granted (`mcp/finance`, `mcp/hr`); there is no bypass.
 
 **User-scoped (interactive):** `ADMIN_NO_SRP_AUTH` or `authorization_code` grant → Cognito issues access token with `custom:roles` claim (via pre-token-generation Lambda V2) → agent forwards token to MCP via `request_header_allowlist` → `AuthMiddleware` extracts roles → tool-level checks enforce access (e.g., only `FinanceUser` can call `get_stock_price`).
 
@@ -16,7 +16,7 @@ Reference implementation for running automated evaluations on an AgentCore-hoste
 
 1. **JWT validation (AgentCore):** Signature, issuer, expiry verified by the platform via `authorizer_configuration` before the request reaches your code.
 2. **Header passthrough:** `request_header_allowlist=["Authorization"]` on both runtimes ensures the JWT reaches the agent and MCP containers.
-3. **Role-based tool access (`AuthMiddleware`):** Uses `fastmcp.server.dependencies.get_http_headers()` to read the JWT, decodes claims, and enforces `custom:roles` against tool `meta`. M2M tokens (scopes but no roles) bypass role checks; user tokens must have the required role.
+3. **Tool-level authorization (`AuthMiddleware`):** Uses `fastmcp.server.dependencies.get_http_headers()` to read the JWT, verifies its signature against the pool's JWKS (issuer, expiry and `token_use` are checked; it fails closed), then authorizes each tool against the `meta` it declares. A gated tool requires a matching `custom:roles` entry **or** a matching scope — user tokens satisfy the role requirement, machine tokens the scope requirement. A newly added gated tool is denied until its scope is explicitly granted.
 
 ## Repo Structure
 
