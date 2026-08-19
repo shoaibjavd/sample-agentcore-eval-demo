@@ -33,8 +33,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP(name="MCP Server", mask_error_details=False)
-mcp.add_middleware(ErrorHandlingMiddleware(logger=logger, include_traceback=True))
+# mask_error_details=True: internal exception text is not returned to the caller, which
+# would otherwise leak paths, claim values and internal state (TS008). Errors are still
+# logged server-side with full detail via the middleware below.
+mcp = FastMCP(name="MCP Server", mask_error_details=True)
+mcp.add_middleware(ErrorHandlingMiddleware(logger=logger, include_traceback=False))
 mcp.add_middleware(AuthMiddleware())
 
 

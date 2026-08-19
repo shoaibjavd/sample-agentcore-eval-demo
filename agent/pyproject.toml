@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 # Versions pinned exactly (TS011) — see mcp-server/pyproject.toml for rationale.
 dependencies = [
     "strands-agents[otel]==1.28.0",
-    "bedrock-agentcore==1.4.1",
+    "bedrock-agentcore==1.18.1",
     "strands-agents-tools==0.2.21",
     "aws-opentelemetry-distro==0.19.0",
     "httpx==0.28.1",

@@ -50,6 +50,30 @@ jobs:
       - name: detect-secrets
         run: detect-secrets scan --exclude-files '\.venv|cdk\.out|package-lock\.json'
 
+      # Dependencies are pinned to exact versions for supply-chain integrity, which also
+      # freezes any vulnerability those versions carry — a one-off audit found 13
+      # advisories across PyJWT, pip and bedrock-agentcore, including 6 in the library
+      # that performs MCP's JWT signature verification. Pins therefore need auditing on
+      # every run, not once. Installs each package so transitive dependencies are covered.
+      - name: pip-audit (dependency vulnerabilities)
+        run: |
+          # set -eu so a failed venv/install aborts the step: silently skipping the audit
+          # would look like a pass. The audit call itself uses || so that a real finding is
+          # recorded for every package rather than stopping at the first one.
+          set -eu
+          status=0
+          for pkg in agent mcp-server; do
+            echo "::group::pip-audit — $pkg"
+            python -m venv "/tmp/audit-$pkg"
+            "/tmp/audit-$pkg/bin/pip" install --quiet --upgrade pip
+            "/tmp/audit-$pkg/bin/pip" install --quiet "./$pkg" pip-audit==2.10.1
+            # The local package itself is not on PyPI and is reported as skipped; that is
+            # expected and does not indicate a missed dependency.
+            "/tmp/audit-$pkg/bin/pip-audit" --progress-spinner off || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+
   evaluate:
     runs-on: ubuntu-latest
     # TS003: a same-repo PR can run this workflow under the AWS OIDC role. Naming an

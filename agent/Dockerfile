@@ -14,7 +14,9 @@ ENV PYTHONUNBUFFERED=1 \
     AWS_DEFAULT_REGION=ap-southeast-2
 
 COPY pyproject.toml pyproject.toml
-RUN pip install --no-cache-dir .
+# Upgrade pip first: the base image ships pip 25.0.1, which carries its own
+# advisories and remains in the final image.
+RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir .
 
 ENV BUILD_VERSION=7
 

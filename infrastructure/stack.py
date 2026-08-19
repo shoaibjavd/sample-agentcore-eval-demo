@@ -68,15 +68,30 @@ class CombinedStack(cdk.Stack):
         # --- Shared Cognito Pool ---
         pre_token_fn = _lambda.Function(
             self, "PreTokenFn",
-            runtime=_lambda.Runtime.PYTHON_3_12,
+            # Latest supported runtime (AwsSolutions-L1). The handler only reads the
+            # event and returns validated claims, so there is no version-specific code.
+            runtime=_lambda.Runtime.PYTHON_3_13,
             handler="index.handler",
             code=_lambda.Code.from_asset(str(repo_root / "infrastructure" / "pre_token_lambda")),
+            # This function is in the authentication path: it injects the custom:roles
+            # claim that the MCP server authorizes against. Tracing it means an
+            # authorization anomaly can actually be investigated (CKV_AWS_115 / TS018).
+            tracing=_lambda.Tracing.ACTIVE,
         )
 
         pool = cognito.UserPool(
             self, "SharedPool",
             user_pool_name=f"shared-{stage}-pool",
             removal_policy=_removal_policy(stage),
+            # Explicit password policy rather than relying on the Cognito default
+            # (AwsSolutions-COG1, which the current rule pack flags when unset).
+            password_policy=cognito.PasswordPolicy(
+                min_length=12,
+                require_lowercase=True,
+                require_uppercase=True,
+                require_digits=True,
+                require_symbols=True,
+            ),
             standard_attributes=cognito.StandardAttributes(
                 email=cognito.StandardAttribute(required=True, mutable=True)
             ),
