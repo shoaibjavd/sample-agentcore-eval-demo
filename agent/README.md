@@ -19,7 +19,7 @@ The agent combines built-in tools with MCP server tools:
 ## Token forwarding
 
 - **User tokens:** If the incoming request has a JWT with a `sub` claim (user token), the agent forwards it to the MCP server so role-based access is enforced.
-- **M2M tokens:** For CI pipeline calls (no `sub` claim), the agent uses a shared M2M client-credentials token to call the MCP server. M2M tokens bypass role checks.
+- **M2M tokens:** For CI pipeline calls, the agent can mint a shared M2M client-credentials token to call the MCP server. Such a token is authorized by the scopes it carries, so `MCP_OAUTH_SCOPE` must name each tool domain the agent needs; it grants no blanket access.
 
 ## Environment variables
 
