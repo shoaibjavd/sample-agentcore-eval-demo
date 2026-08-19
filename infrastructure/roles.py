@@ -59,6 +59,13 @@ class AgentCoreRuntimeRole(Construct):
     DEFAULT_MODEL_ID = "au.anthropic.claude-haiku-4-5-20251001-v1:0"
     INFERENCE_PROFILE_REGIONS = ("ap-southeast-2", "ap-southeast-4")
 
+    # Known cross-region routing prefixes. Matched explicitly rather than inferred: a
+    # provider name is also alphabetic and dot-separated, so a heuristic would strip
+    # "anthropic." from a plain model id such as "anthropic.claude-3-..." and build an
+    # invalid foundation-model ARN, silently breaking InvokeModel authorization.
+    # Extend this tuple if AWS introduces further prefixes.
+    CROSS_REGION_PREFIXES = ("au", "us", "eu", "apac", "global")
+
     def __init__(
         self,
         scope: Construct,
@@ -75,7 +82,8 @@ class AgentCoreRuntimeRole(Construct):
         account = stack.account
 
         # Strip the cross-region routing prefix ("au.") to get the base foundation model id.
-        base_model_id = model_id.split(".", 1)[1] if model_id.split(".", 1)[0].isalpha() and "." in model_id else model_id
+        prefix, _, rest = model_id.partition(".")
+        base_model_id = rest if prefix in self.CROSS_REGION_PREFIXES else model_id
         bedrock_model_resources = [
             f"arn:aws:bedrock:{region}:{account}:inference-profile/{model_id}",
             *[
