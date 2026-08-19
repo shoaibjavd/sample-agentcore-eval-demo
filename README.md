@@ -87,8 +87,7 @@ an intervention.
 │   ├── evaluate_stored_traces.py    # Evaluate pre-collected fixtures
 │   └── eval_dataset.json            # Test prompts
 ├── docs/
-│   ├── sbom/                        # CycloneDX SBOMs, generated from the built images
-│   └── security/                    # Scan results and threat model
+│   └── sbom/                        # CycloneDX SBOMs, generated from the built images
 ├── .github/
 │   └── workflows/
 │       └── agentcore-eval.yml       # CI/CD pipeline
