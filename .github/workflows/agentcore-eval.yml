@@ -25,7 +25,7 @@ env:
   AWS_REGION: ap-southeast-2
 
 jobs:
-  # Static security scanning (TS017). Reports only for now: `continue-on-error: true`
+  # Static security scanning. Reports only for now: `continue-on-error: true`
   # means a finding will not block the PR. Triage the current findings, then remove that
   # line to turn this into a real gate.
   security-scan:
@@ -51,10 +51,9 @@ jobs:
         run: detect-secrets scan --exclude-files '\.venv|cdk\.out|package-lock\.json'
 
       # Dependencies are pinned to exact versions for supply-chain integrity, which also
-      # freezes any vulnerability those versions carry — a one-off audit found 13
-      # advisories across PyJWT, pip and bedrock-agentcore, including 6 in the library
-      # that performs MCP's JWT signature verification. Pins therefore need auditing on
-      # every run, not once. Installs each package so transitive dependencies are covered.
+      # means a pinned version keeps whatever vulnerabilities it shipped with until it is
+      # deliberately bumped. Pins therefore need auditing on every run, not once.
+      # Installs each package so transitive dependencies are covered.
       - name: pip-audit (dependency vulnerabilities)
         run: |
           # set -eu so a failed venv/install aborts the step: silently skipping the audit
@@ -76,7 +75,7 @@ jobs:
 
   evaluate:
     runs-on: ubuntu-latest
-    # TS003: a same-repo PR can run this workflow under the AWS OIDC role. Naming an
+    # A same-repo PR can run this workflow under the AWS OIDC role. Naming an
     # environment lets you require reviewer approval before credentials are issued —
     # configure "Required reviewers" on the `dev` environment in repo settings, otherwise
     # this is a label only. Also scope the role's trust policy to this repo and to
@@ -149,7 +148,7 @@ jobs:
           import urllib.parse, json, subprocess
           # Read client credentials from Secrets Manager rather than interpolating the
           # secret into a command line, where it would appear in the process list and
-          # risk landing in logs (TS014).
+          # risk landing in logs.
           sm = boto3.client('secretsmanager', region_name='${{ env.AWS_REGION }}')
           creds = json.loads(sm.get_secret_value(SecretId='agentcore/dev/m2m-client')['SecretString'])
           token_resp = subprocess.run([
@@ -194,7 +193,7 @@ jobs:
           AGENT_RUNTIME_ID: ${{ steps.cdk.outputs.agent_id }}
           TOKEN_ENDPOINT: ${{ steps.cdk.outputs.token_endpoint }}
           # The script reads client_id/client_secret straight from Secrets Manager, so the
-          # secret value never enters a step output, env file, or log (TS014).
+          # secret value never enters a step output, env file, or log.
           M2M_SECRET_ID: agentcore/dev/m2m-client
           # mcp/invoke is required by the MCP AuthMiddleware for M2M tokens
           # (see mcp-server/src/auth/middleware.py); agentcore/invoke authorizes

@@ -70,11 +70,10 @@ class AuthMiddleware(Middleware):
           - user tokens satisfy the role requirement via the custom:roles claim
           - machine (client_credentials) tokens satisfy the scope requirement
 
-        There is deliberately no M2M bypass. Previously any token with scopes and no roles
-        was granted every tool, so a leaked client secret reached all of them — including
-        tools added later, which were exposed the moment they shipped (TS001). Now a
-        machine caller reaches only what its granted scopes name, and a newly added gated
-        tool is denied until a scope is explicitly granted in the CDK stack.
+        There is deliberately no blanket bypass for machine callers: a machine caller
+        reaches only what its granted scopes name, and a newly added gated tool is denied
+        until a scope is explicitly granted in the CDK stack. Deny-by-default matters most
+        for tools added later, which must not become reachable simply by shipping.
         """
         meta = component.meta or {}
         required_roles = meta.get(ROLES_META_KEY) or []

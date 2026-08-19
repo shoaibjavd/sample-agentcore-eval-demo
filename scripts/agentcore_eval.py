@@ -22,7 +22,7 @@ def _oauth_credentials() -> tuple[str, str]:
     """Resolve the M2M client_id/client_secret.
 
     Prefers reading directly from Secrets Manager (M2M_SECRET_ID) so the secret never
-    passes through CI step outputs, environment files, or job logs (TS014). Falls back to
+    passes through CI step outputs, environment files, or job logs. Falls back to
     OAUTH_CLIENT_ID/OAUTH_CLIENT_SECRET for local runs.
     """
     secret_id = os.environ.get("M2M_SECRET_ID")

@@ -1,7 +1,7 @@
 """Token extraction from HTTP headers.
 
 AgentCore validates the JWT at the platform edge before the request reaches this
-container. We re-verify the signature here as defence in depth (TS002): if anything ever
+container. We re-verify the signature here as defence in depth: if anything ever
 reaches this server without passing through that authorizer — a misconfigured
 request_header_allowlist, a future private-network topology, or a direct in-VPC call —
 claim-based authorization would otherwise trust an attacker-supplied, unsigned token.

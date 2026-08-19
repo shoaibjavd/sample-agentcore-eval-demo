@@ -145,7 +145,7 @@ class AgentCoreRuntimeRole(Construct):
                             actions=["bedrock-agentcore:InvokeAgentRuntime"],
                             # Scoped to the specific target runtime(s) this agent calls.
                             # The MCP runtime ARN is known at synth time, so the previous
-                            # account-wide agent-runtime/* grant was not required (TS007).
+                            # account-wide agent-runtime/* grant was not required.
                             resources=a2a_resources,
                         ),
                     ]

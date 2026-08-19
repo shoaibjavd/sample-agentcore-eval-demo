@@ -19,7 +19,7 @@ MODEL_ID = AgentCoreRuntimeRole.DEFAULT_MODEL_ID
 
 
 def _removal_policy(stage: str) -> cdk.RemovalPolicy:
-    """DESTROY for the throwaway dev stack, RETAIN everywhere else (TS011).
+    """DESTROY for the throwaway dev stack, RETAIN everywhere else.
 
     The Cognito pool holds user identities and the secret holds live credentials, so a
     `cdk destroy` against a real environment would delete authentication data outright.
@@ -33,7 +33,7 @@ def _account_slug(scope: Construct) -> str:
     """Stable, non-identifying suffix for globally-unique public names.
 
     The Cognito domain prefix is resolvable from the internet, so embedding the raw
-    account ID discloses it (TS009/TS018). Hashing keeps the value deterministic (the
+    account ID discloses it. Hashing keeps the value deterministic (the
     domain is stable across deploys) and unique per account without revealing it.
 
     If the account is an unresolved CloudFormation token — which happens when the stack
@@ -68,14 +68,14 @@ class CombinedStack(cdk.Stack):
         # --- Shared Cognito Pool ---
         pre_token_fn = _lambda.Function(
             self, "PreTokenFn",
-            # Latest supported runtime (AwsSolutions-L1). The handler only reads the
+            # Latest supported runtime. The handler only reads the
             # event and returns validated claims, so there is no version-specific code.
             runtime=_lambda.Runtime.PYTHON_3_13,
             handler="index.handler",
             code=_lambda.Code.from_asset(str(repo_root / "infrastructure" / "pre_token_lambda")),
             # This function is in the authentication path: it injects the custom:roles
             # claim that the MCP server authorizes against. Tracing it means an
-            # authorization anomaly can actually be investigated (CKV_AWS_115 / TS018).
+            # authorization anomaly can actually be investigated.
             tracing=_lambda.Tracing.ACTIVE,
         )
 
@@ -84,7 +84,7 @@ class CombinedStack(cdk.Stack):
             user_pool_name=f"shared-{stage}-pool",
             removal_policy=_removal_policy(stage),
             # Explicit password policy rather than relying on the Cognito default
-            # (AwsSolutions-COG1, which the current rule pack flags when unset).
+            # relying on the Cognito default.
             password_policy=cognito.PasswordPolicy(
                 min_length=12,
                 require_lowercase=True,
@@ -95,7 +95,7 @@ class CombinedStack(cdk.Stack):
             standard_attributes=cognito.StandardAttributes(
                 email=cognito.StandardAttribute(required=True, mutable=True)
             ),
-            # custom:roles is immutable (TS005): it is the authorization claim the MCP
+            # custom:roles is immutable: it is the authorization claim the MCP
             # server trusts, so it must not be changeable after user creation via
             # AdminUpdateUserAttributes. Roles are set once, at user creation below.
             custom_attributes={"roles": cognito.StringAttribute(mutable=False)},
@@ -112,7 +112,7 @@ class CombinedStack(cdk.Stack):
             {"LambdaArn": pre_token_fn.function_arn, "LambdaVersion": "V2_0"},
         )
 
-        # Per-domain tool scopes (TS001). A machine caller is granted only the domains it
+        # Per-domain tool scopes. A machine caller is granted only the domains it
         # needs, so a leaked client secret cannot reach every gated tool, and a newly added
         # gated tool is denied to machine callers until its scope is granted here.
         mcp_rs = pool.add_resource_server(
@@ -132,7 +132,7 @@ class CombinedStack(cdk.Stack):
             "M2MClient", generate_secret=True,
             o_auth=cognito.OAuthSettings(
                 flows=cognito.OAuthFlows(client_credentials=True),
-                # Explicit least privilege (TS001): the CI evaluation dataset exercises the
+                # Explicit least privilege: the CI evaluation dataset exercises the
                 # finance and HR tools, so those scopes are granted deliberately. Remove a
                 # scope here and the matching tool becomes inaccessible to CI.
                 scopes=[
@@ -153,7 +153,7 @@ class CombinedStack(cdk.Stack):
                 flows=cognito.OAuthFlows(authorization_code_grant=True, implicit_code_grant=True),
                 # Deliberately NOT granted mcp/finance or mcp/hr. Tool scopes satisfy the
                 # same authorization check as roles, so granting them here would let a user
-                # request a scope and reach a tool their role does not permit (TS001/TS005).
+                # request a scope and reach a tool their role does not permit.
                 scopes=[
                     cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE,
                     cognito.OAuthScope.custom("agentcore/invoke"), cognito.OAuthScope.custom("mcp/invoke"),
@@ -165,7 +165,7 @@ class CombinedStack(cdk.Stack):
         user_client.node.add_dependency(agent_rs)
 
         # Domain prefix must be globally unique per region, but it is also publicly
-        # resolvable, so it must not disclose the AWS account ID (TS009/TS018).
+        # resolvable, so it must not disclose the AWS account ID.
         # A truncated SHA-256 of the account keeps uniqueness without leaking it.
         # "shared-*" was additionally too generic and collided with unrelated stacks.
         domain = pool.add_domain(
@@ -232,7 +232,7 @@ class CombinedStack(cdk.Stack):
                 request_header_allowlist=["Authorization"]
             ),
             # LOG_LEVEL stays at INFO: DEBUG logs decoded JWT claims and token
-            # fragments, which anyone with CloudWatch read access could harvest (TS008).
+            # fragments, which anyone with CloudWatch read access could harvest.
             environment_variables={"AWS_DEFAULT_REGION": region, "LOG_LEVEL": "INFO", "DEPLOY_VERSION": "9", "USER_POOL_ID": pool.user_pool_id},
         )
 
@@ -269,13 +269,13 @@ class CombinedStack(cdk.Stack):
             ),
             environment_variables={
                 "AWS_DEFAULT_REGION": region,
-                # See TS008 note on the MCP runtime above.
+                # See the logging note on the MCP runtime above.
                 "LOG_LEVEL": "INFO",
                 "MODEL_ID": MODEL_ID,
                 "MCP_SERVER_ARN": mcp_runtime.attr_agent_runtime_arn,
                 # Scopes the agent requests when minting its own machine token (the
                 # fallback path when no user token is present). Must name each tool domain
-                # it needs, since scopes now gate tools individually (TS001).
+                # it needs, since scopes gate tools individually.
                 "MCP_OAUTH_SCOPE": "mcp/invoke mcp/finance mcp/hr",
                 "MCP_CLIENT_ID": m2m_client.user_pool_client_id,
                 "MCP_TOKEN_ENDPOINT": token_endpoint,
@@ -286,7 +286,7 @@ class CombinedStack(cdk.Stack):
 
         m2m_secret.grant_read(agent_role.role)
 
-        # --- Denial-of-wallet detection (TS010) ---
+        # --- Runaway-spend detection ---
         # AgentCore exposes no request-rate throttle, and both runtimes are PUBLIC, so a
         # caller holding a valid token can drive unbounded model spend. These alarms are a
         # *detection* control on the metric that actually tracks cost. Preventing the spend
@@ -301,7 +301,7 @@ class CombinedStack(cdk.Stack):
                 self, name,
                 alarm_description=(
                     f"More than {threshold} {unit_label} for {MODEL_ID} in 5 minutes — "
-                    "possible denial-of-wallet or runaway loop (TS010). Tune per environment."
+                    "possible runaway loop or abuse. Tune per environment."
                 ),
                 metric=cloudwatch.Metric(
                     namespace="AWS/Bedrock",

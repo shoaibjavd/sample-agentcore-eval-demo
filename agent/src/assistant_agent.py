@@ -223,7 +223,7 @@ async def handle_request(payload, request_context: RequestContext = None):
                 user_mcp_client.__exit__(None, None, None)
             except Exception as e:
                 # Teardown failure must not mask the request result, but it should
-                # not be swallowed silently either (bandit B110).
+                # not be swallowed silently either.
                 logger.warning(f"Failed to close user MCP client: {e}")
 
 

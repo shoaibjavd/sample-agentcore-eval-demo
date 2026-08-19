@@ -1,4 +1,4 @@
-# Base image pinned by digest (TS011). Tag 3.12-slim is mutable; the digest below
+# Base image pinned by digest. Tag 3.12-slim is mutable; the digest below
 # is python:3.12-slim as verified for linux/arm64. Update deliberately.
 FROM --platform=linux/arm64 public.ecr.aws/docker/library/python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a
 
@@ -13,7 +13,7 @@ COPY pyproject.toml .
 # advisories and remains in the final image.
 RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir .
 
-# Run as an unprivileged user (CKV_DOCKER_3). Dependencies are installed as root
+# Run as an unprivileged user. Dependencies are installed as root
 # above; application code below is copied root-owned and world-readable, so the
 # runtime user has read-only access to it.
 RUN useradd -m -u 1000 bedrock_agentcore

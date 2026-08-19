@@ -2,7 +2,7 @@
 name = "assistant-agent"
 version = "0.1.0"
 requires-python = ">=3.12"
-# Versions pinned exactly (TS011) — see mcp-server/pyproject.toml for rationale.
+# Versions pinned exactly — see mcp-server/pyproject.toml for rationale.
 dependencies = [
     "strands-agents[otel]==1.28.0",
     "bedrock-agentcore==1.18.1",
