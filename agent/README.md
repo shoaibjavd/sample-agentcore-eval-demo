@@ -4,17 +4,15 @@ Strands-based assistant agent deployed as an AgentCore HTTP runtime.
 
 ## How it works
 
-The agent combines built-in tools with MCP server tools:
+The agent combines a built-in tool with MCP server tools:
 
 **Built-in tools:**
 - `calculator` — math operations (from strands-agents-tools)
-- `weather` — mock weather data
 
 **MCP tools (from the MCP server):**
-- `get_capital_city` — capital city lookup (public)
-- `get_current_datetime` — current time in any timezone (public)
-- `get_stock_price` — mock stock prices (requires `FinanceUser` role)
-- `get_employee_count` — mock employee counts (requires `HRUser` role)
+- `get_current_datetime` — current date/time in any IANA timezone (public)
+- `get_stock_price` — mock stock prices (requires `FinanceUser` role or `mcp/finance` scope)
+- `get_employee_count` — mock department headcounts (requires `HRUser` role or `mcp/hr` scope)
 
 ## Token forwarding
 
@@ -29,8 +27,11 @@ The agent combines built-in tools with MCP server tools:
 |---|---|
 | `MODEL_ID` | Bedrock model ID (default: `au.anthropic.claude-haiku-4-5-20251001-v1:0`) |
 | `MCP_SERVER_ARN` | ARN of the MCP server AgentCore runtime |
-| `MCP_OAUTH_SCOPE` | OAuth scope for MCP invocation (default: `mcp/invoke`) |
+| `MCP_OAUTH_SCOPE` | OAuth scope requested for the M2M token (default: `mcp/invoke`); must name each tool domain the agent needs (e.g. `mcp/invoke mcp/finance mcp/hr`) |
 | `MCP_CLIENT_ID` | Cognito M2M client ID |
 | `MCP_CLIENT_SECRET` | Cognito M2M client secret |
 | `MCP_TOKEN_ENDPOINT` | Cognito token endpoint URL |
+| `SECRET_ARN` | Secrets Manager ARN holding `client_id`/`client_secret`/`token_endpoint`; used as a fallback when `MCP_CLIENT_SECRET` is unset |
+| `GUARDRAIL_ID` | Bedrock Guardrail ID; a guardrail is applied only when both this and `GUARDRAIL_VERSION` are set |
+| `GUARDRAIL_VERSION` | Published Bedrock Guardrail version (paired with `GUARDRAIL_ID`) |
 | `AWS_DEFAULT_REGION` | AWS region (default: `ap-southeast-2`) |

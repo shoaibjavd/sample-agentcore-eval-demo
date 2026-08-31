@@ -156,7 +156,7 @@ def main():
                     evaluators=evaluators,
                     output="evals_results/ci_output.json",
                 )
-        except (RuntimeError, Exception) as e:
+        except Exception as e:
             elapsed += interval
             print(f"No traces yet... retrying ({elapsed}s / {max_wait}s) — {e}")
             time.sleep(interval)
