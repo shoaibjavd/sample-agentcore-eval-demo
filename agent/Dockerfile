@@ -23,8 +23,8 @@ ENV BUILD_VERSION=7
 RUN useradd -m -u 1000 bedrock_agentcore
 USER bedrock_agentcore
 
-EXPOSE 9000
-EXPOSE 8000
+# The agent is served by BedrockAgentCoreApp().run(), which defaults to port 8080
+# (the AgentCore Runtime HTTP contract port for /invocations and /ping).
 EXPOSE 8080
 
 COPY src/ .
