@@ -1,5 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: MIT-0
+# SPDX-License-Identifier: Apache-2.0
 """Assistant Agent — Strands-based agent deployed on Bedrock AgentCore.
 
 Connects to an MCP server for role-gated tools (finance, HR, datetime).
@@ -8,21 +8,23 @@ Supports two auth modes:
   - M2M tokens (CI/pipelines): shared cached token via Cognito client credentials
 """
 
-from strands import Agent
-from strands_tools import calculator
-from strands.tools.mcp import MCPClient
-from mcp.client.streamable_http import streamablehttp_client, streamable_http_client
-import os
-import json
-import time
 import base64
+import json
+import logging
+import os
+import time
 import urllib.parse
+
 import boto3
 import httpx
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from bedrock_agentcore.runtime.context import RequestContext
+from botocore.exceptions import ClientError
+from mcp.client.streamable_http import streamable_http_client
+from strands import Agent
 from strands.models import BedrockModel
-import logging
+from strands.tools.mcp import MCPClient
+from strands_tools import calculator
 
 app = BedrockAgentCoreApp()
 
@@ -56,9 +58,9 @@ MCP_OAUTH_SCOPE = os.getenv("MCP_OAUTH_SCOPE", "mcp/invoke")
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "ap-southeast-2")
 _encoded_arn = urllib.parse.quote(MCP_SERVER_ARN, safe="") if MCP_SERVER_ARN else None
 MCP_URL = (
-    f"https://bedrock-agentcore.{AWS_REGION}.amazonaws.com/runtimes/"
-    f"{_encoded_arn}/invocations?qualifier=DEFAULT"
-    if _encoded_arn else None
+    f"https://bedrock-agentcore.{AWS_REGION}.amazonaws.com/runtimes/{_encoded_arn}/invocations?qualifier=DEFAULT"
+    if _encoded_arn
+    else None
 )
 
 # Simple in-memory cache for M2M tokens (refreshed before expiry)
@@ -87,7 +89,7 @@ async def get_mcp_token_m2m() -> str:
             client_id = secret_data.get("client_id", client_id)
             client_secret = secret_data["client_secret"]
             token_endpoint = secret_data.get("token_endpoint", token_endpoint)
-        except Exception as e:
+        except (ClientError, KeyError, ValueError) as e:
             print(f"Failed to retrieve secret: {e}")
 
     if not all([client_id, client_secret, token_endpoint]):
@@ -116,6 +118,7 @@ async def get_mcp_token_m2m() -> str:
 def _extract_bearer_token() -> str | None:
     """Extract Bearer token from BedrockAgentCoreContext headers."""
     from bedrock_agentcore.runtime import BedrockAgentCoreContext
+
     headers = BedrockAgentCoreContext.get_request_headers() or {}
     auth = headers.get("Authorization") or headers.get("authorization") or ""
     return auth.removeprefix("Bearer ").strip() or None
@@ -132,7 +135,7 @@ def _is_user_token(token: str) -> bool:
         payload += "=" * (-len(payload) % 4)
         claims = json.loads(base64.urlsafe_b64decode(payload))
         return "sub" in claims
-    except Exception:
+    except (ValueError, KeyError, IndexError):
         return False
 
 
@@ -148,7 +151,7 @@ def _make_mcp_client(token: str) -> MCPClient | None:
         )
         client.__enter__()
         return client
-    except Exception as e:
+    except (httpx.HTTPError, OSError, RuntimeError) as e:
         print(f"Failed to initialize MCP client: {e}")
         return None
 
@@ -168,7 +171,7 @@ async def _get_m2m_mcp_client() -> MCPClient | None:
         token = await get_mcp_token_m2m()
         _m2m_mcp_client = _make_mcp_client(token)
         return _m2m_mcp_client
-    except Exception as e:
+    except (httpx.HTTPError, OSError, RuntimeError, ValueError) as e:
         print(f"Failed to initialize MCP client: {e}")
         return None
 
@@ -181,9 +184,9 @@ def get_tools(mcp_client: MCPClient | None):
     if mcp_client:
         try:
             tools.extend(mcp_client.list_tools_sync())
-            print(f"Retrieved {len(tools)-1} tools from MCP server")
-            logger.info(f"Retrieved {len(tools)-1} tools from MCP server")
-        except Exception as e:
+            print(f"Retrieved {len(tools) - 1} tools from MCP server")
+            logger.info(f"Retrieved {len(tools) - 1} tools from MCP server")
+        except (httpx.HTTPError, OSError, RuntimeError) as e:
             print(f"Failed to list MCP tools: {e}")
             logger.error(f"Failed to list MCP tools: {e}")
     return tools
@@ -204,10 +207,7 @@ async def handle_request(payload, request_context: RequestContext = None):
 
     if incoming_token and _is_user_token(incoming_token):
         # Per-request MCP client with user's token for role-based access
-        user_http_client = httpx.AsyncClient(
-            timeout=120,
-            headers={"Authorization": f"Bearer {incoming_token}"}
-        )
+        user_http_client = httpx.AsyncClient(timeout=120, headers={"Authorization": f"Bearer {incoming_token}"})
         user_mcp_client = MCPClient(
             lambda hc=user_http_client: streamable_http_client(url=MCP_URL, http_client=hc),
             startup_timeout=120,
@@ -231,7 +231,7 @@ async def handle_request(payload, request_context: RequestContext = None):
                 "department headcount queries. Use the appropriate tool for each request. "
                 "Respond concisely and professionally. If a request falls outside your "
                 "available tools, say so clearly rather than guessing."
-            )
+            ),
         )
         result = await agent.invoke_async(prompt)
         return str(result)
